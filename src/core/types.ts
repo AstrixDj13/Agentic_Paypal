@@ -1,0 +1,81 @@
+// Shared domain types for Agent Pocket + Black Box.
+
+/** Product attributes compared field by field, e.g. { brand: "nike", size_us: "10" }. */
+export type Attributes = Record<string, string>;
+
+/** Structured rules the user approves and signs once. */
+export interface Mandate {
+  id: string;
+  pocketId: string;
+  /** The user's original words, kept verbatim for the record. */
+  instruction: string;
+  /** Short description of what may be bought, e.g. "road running shoes". */
+  item: string;
+  /** Hard constraints. Each key must match exactly (after normalisation) on the agent's claim. */
+  required: Attributes;
+  /** Allowed values for a key, e.g. { brand: ["nike", "adidas"] }. */
+  allowed: Record<string, string[]>;
+  maxUnitPrice: number;
+  currency: "USD";
+  maxQuantity: number;
+  /** Merchant ids the agent may buy from. Empty = any agent-ready merchant. */
+  merchants: string[];
+  expiresAt: string; // ISO
+  createdAt: string; // ISO
+}
+
+export interface SignedMandate {
+  mandate: Mandate;
+  /** Ed25519 public key, base64 SPKI DER. */
+  publicKey: string;
+  /** Ed25519 signature over canonical JSON of `mandate`, base64. */
+  signature: string;
+}
+
+export interface Pocket {
+  id: string;
+  name: string;
+  balance: number;
+  currency: "USD";
+}
+
+/** What the agent says it is buying. The guard only ever sees this claim. */
+export interface ProposedOrder {
+  mandateId: string;
+  merchantId: string;
+  productId: string;
+  title: string;
+  attributes: Attributes;
+  unitPrice: number;
+  quantity: number;
+  currency: "USD";
+  reasoning: string;
+}
+
+export interface GuardState {
+  killSwitch: boolean;
+  maxPurchasesPerDay: number;
+  purchasesToday: number;
+  /** Merchants the user has already approved at least once. */
+  knownMerchants: string[];
+}
+
+/** What the product page actually said when the agent looked at it. */
+export interface PageSnapshot {
+  url: string;
+  merchantId: string;
+  productId: string;
+  title: string;
+  attributes: Attributes;
+  unitPrice: number;
+  listingText: string;
+  capturedAt: string;
+}
+
+/** What actually arrived, read from the user's photo by a vision model. */
+export interface DeliveryReading {
+  attributes: Attributes;
+  /** 0..1 confidence reported by the vision step. */
+  confidence: number;
+  photoRef: string;
+}
