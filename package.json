@@ -9,13 +9,21 @@
     "node": ">=20"
   },
   "scripts": {
+    "dev": "tsx watch --env-file=.env src/server.ts",
+    "start": "tsx src/server.ts",
+    "e2e": "tsx --env-file=.env scripts/e2e.ts",
     "spike": "tsx --env-file=.env scripts/sandbox-spike.ts",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@types/express": "^4.17.25",
     "@types/node": "^26.6.6",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.5.0",
+    "express": "^4.22.3"
   }
 }

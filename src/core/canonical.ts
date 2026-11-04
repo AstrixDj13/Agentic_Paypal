@@ -23,6 +23,6 @@ export function sha256(text: string): string {
 }
 
 /** Normalise attribute values so "US 10", "10 " and "10" compare equal. */
-export function normalizeValue(v: string): string {
-  return v.trim().toLowerCase().replace(/^us\s*/, "").replace(/\s+/g, " ");
+export function normalizeValue(v: string | number): string {
+  return String(v).trim().toLowerCase().replace(/^us\s*/, "").replace(/\s+/g, " ");
 }
