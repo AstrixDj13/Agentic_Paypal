@@ -14,7 +14,9 @@
     "e2e": "tsx --env-file=.env scripts/e2e.ts",
     "spike": "tsx --env-file=.env scripts/sandbox-spike.ts",
     "test": "tsx --test test/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "npm --prefix web install --include=dev && npm --prefix web run build",
+    "dev:web": "npm --prefix web run dev"
   },
   "devDependencies": {
     "@types/express": "^4.17.25",

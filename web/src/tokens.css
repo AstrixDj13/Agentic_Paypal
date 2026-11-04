@@ -1,0 +1,85 @@
+/*
+ * DESIGN TOKENS — the only file to change when Anubhav's design system lands.
+ * Every colour, font, radius, spacing and shadow in the app reads from these variables.
+ */
+:root {
+  /* Brand */
+  --brand-navy: #0b1f3a;
+  --brand-blue: #1f6feb;
+  --brand-blue-soft: #e8f0fe;
+  --brand-gold: #ffc439;
+
+  /* Surfaces & text */
+  --bg: #f4f6fb;
+  --surface: #ffffff;
+  --surface-2: #f8f9fc;
+  --text: #0f172a;
+  --text-muted: #5b6475;
+  --border: #e3e7ef;
+
+  /* Status */
+  --ok: #0f8a5f;
+  --ok-soft: #e3f6ee;
+  --warn: #a15c00;
+  --warn-soft: #fff3dc;
+  --danger: #c2291d;
+  --danger-soft: #fde8e6;
+  --info: #3d4fd1;
+  --info-soft: #ebedfd;
+
+  /* Type */
+  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, ui-monospace, monospace;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 15px;
+  --text-lg: 18px;
+  --text-xl: 24px;
+  --text-2xl: 32px;
+
+  /* Shape & space */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-pill: 999px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 6px 20px rgba(15, 23, 42, 0.08);
+  --shadow-phone: 0 30px 80px rgba(11, 31, 58, 0.25);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b1220;
+    --surface: #121a2b;
+    --surface-2: #172138;
+    --text: #e7ecf5;
+    --text-muted: #9aa6bd;
+    --border: #243049;
+    --brand-blue-soft: #16264a;
+    --ok-soft: #0f2e25;
+    --warn-soft: #33260c;
+    --danger-soft: #3a1714;
+    --info-soft: #1b2150;
+    --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.35);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0b1220;
+  --surface: #121a2b;
+  --surface-2: #172138;
+  --text: #e7ecf5;
+  --text-muted: #9aa6bd;
+  --border: #243049;
+  --brand-blue-soft: #16264a;
+  --ok-soft: #0f2e25;
+  --warn-soft: #33260c;
+  --danger-soft: #3a1714;
+  --info-soft: #1b2150;
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
