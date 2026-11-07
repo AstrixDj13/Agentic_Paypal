@@ -9,6 +9,8 @@ import type { GuardState, Pocket, ProposedOrder, SignedMandate } from "./types.t
 
 export type GuardRule =
   | "kill_switch"
+  | "agent_paused"
+  | "ask_every_purchase"
   | "signature"
   | "mandate_mismatch"
   | "expired"
@@ -16,6 +18,7 @@ export type GuardRule =
   | "new_merchant_needs_approval"
   | "required_attribute"
   | "attribute_not_allowed"
+  | "avoided_term"
   | "price_over_limit"
   | "quantity_over_limit"
   | "insufficient_pocket_balance"
@@ -46,6 +49,7 @@ export function checkOrder(
   const total = round2(order.unitPrice * order.quantity);
 
   if (state.killSwitch) v.push({ rule: "kill_switch", detail: "Kill switch is on; all agent spending is paused." });
+  if (pocket.paused) v.push({ rule: "agent_paused", detail: `${pocket.name} is paused; it cannot buy until you resume it.` });
   if (!verifyMandate(signed)) v.push({ rule: "signature", detail: "Mandate signature is invalid or the mandate was altered." });
   if (order.mandateId !== m.id) v.push({ rule: "mandate_mismatch", detail: `Order cites mandate ${order.mandateId}, expected ${m.id}.` });
   if (new Date(m.expiresAt).getTime() <= now.getTime()) v.push({ rule: "expired", detail: `Mandate expired at ${m.expiresAt}.` });
@@ -67,6 +71,10 @@ export function checkOrder(
     if (!ok) v.push({ rule: "attribute_not_allowed", detail: `${key} must be one of ${options.join("/")}, order has "${got ?? "missing"}".` });
   }
 
+  const hay = `${order.title} ${Object.values(order.attributes).join(" ")}`.toLowerCase();
+  for (const word of m.avoid ?? []) {
+    if (word.trim() && hay.includes(word.trim().toLowerCase())) v.push({ rule: "avoided_term", detail: `You said no "${word}", and this is "${order.title}".` });
+  }
   if (order.unitPrice > m.maxUnitPrice) v.push({ rule: "price_over_limit", detail: `Unit price $${order.unitPrice} exceeds limit $${m.maxUnitPrice}.` });
   if (order.quantity < 1 || order.quantity > m.maxQuantity) v.push({ rule: "quantity_over_limit", detail: `Quantity ${order.quantity} outside 1..${m.maxQuantity}.` });
   if (total > pocket.balance) v.push({ rule: "insufficient_pocket_balance", detail: `Total $${total} exceeds pocket "${pocket.name}" balance $${pocket.balance}.` });
@@ -74,10 +82,11 @@ export function checkOrder(
 
   if (v.length > 0) return { outcome: "block", violations: v, total };
 
-  // Soft rule: a merchant the user has never approved needs a one-tap confirmation.
-  if (!state.knownMerchants.includes(order.merchantId)) {
-    return { outcome: "ask_user", violations: [{ rule: "new_merchant_needs_approval", detail: `First purchase from "${order.merchantId}".` }], total };
-  }
+  // Soft rules: everything is inside the rules, but the user wants a tap first.
+  const soft: Violation[] = [];
+  if (!state.knownMerchants.includes(order.merchantId)) soft.push({ rule: "new_merchant_needs_approval", detail: `First purchase from "${order.merchantId}".` });
+  if (state.askEveryPurchase) soft.push({ rule: "ask_every_purchase", detail: `${pocket.name} is set to ask you before every purchase.` });
+  if (soft.length) return { outcome: "ask_user", violations: soft, total };
   return { outcome: "allow", violations: [], total };
 }
 

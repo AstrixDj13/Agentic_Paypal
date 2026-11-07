@@ -14,9 +14,14 @@ export default function Store() {
   const { toast, show } = useToast();
   const [reveal, setReveal] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [query, setQuery] = useState("Nike running shoes");
+  const [agentId, setAgentId] = useState<string>("");
 
   if (!state) return <div className="store"><p className="store-pad">Loading…</p></div>;
-  const mandate = state.mandates[0]?.mandate;
+  // Which agent the demo buttons send. Defaults to the first agent that has a job.
+  const withJobs = state.pockets.filter((p) => state.mandates.some((m) => m.mandate.pocketId === p.id));
+  const agent = withJobs.find((p) => p.id === agentId) ?? withJobs[0];
+  const mandate = agent ? state.mandates.find((m) => m.mandate.pocketId === agent.id)?.mandate : undefined;
 
   const act = async (key: string, fn: () => Promise<any>, ok?: (r: any) => string) => {
     setBusy(key);
@@ -52,19 +57,41 @@ export default function Store() {
             <span className="backstage-links"><Link to="/">Pocket app ↗</Link><Link to="/console">Black Box ↗</Link></span>
           </div>
           <p>
-            {mandate ? <>Agent rule in use: “{mandate.instruction}”.</> : "Create a pocket and a rule in the Pocket app first."}{" "}
+            {mandate ? <>Sending <strong>{agent!.name}</strong>, whose job is “{mandate.instruction}”.</> : "Create an agent with a job in the Pocket app first."}{" "}
             “Careful” is a well-behaved agent. “Naive*” simulates a weak or tricked agent that misreads labels and obeys hidden page text, to show the guard and Black Box protect you anyway.
           </p>
+          {withJobs.length > 1 && (
+            <div className="import-row" role="radiogroup" aria-label="Agent to send">
+              {withJobs.map((p) => (
+                <button key={p.id} role="radio" aria-checked={agent?.id === p.id} className={`s-btn ${agent?.id === p.id ? "dark" : ""}`} onClick={() => setAgentId(p.id)}>
+                  <span style={{ width: 12, height: 12, borderRadius: 6, background: p.color, display: "inline-block" }} />{p.name}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="backstage-actions">
             <label className="check"><input type="checkbox" checked={reveal} onChange={(e) => setReveal(e.target.checked)} /> Show hidden text (what agents read)</label>
-            <button className="s-btn" onClick={() => confirm("Reset pockets, rules, purchases and the store?") && act("reset", () => api("/api/demo/reset", {}), () => "Demo reset")}>Reset demo</button>
+            <button className="s-btn" onClick={() => confirm("Reset agents, rules, chats, purchases and the store?") && act("reset", () => api("/api/demo/reset", {}), () => "Demo reset")}>Reset demo</button>
           </div>
+          {state.channel3?.enabled && (
+            <div className="stack-sm">
+              <strong>Import real products (Channel3)</strong>
+              <div className="import-row">
+                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="e.g. Adidas running shoes" />
+                <button className="s-btn dark" disabled={!!busy || !query.trim()} onClick={() => act("import", () => api<Product[]>("/api/store/import", { query, maxPrice: mandate?.maxUnitPrice }), (r) => `Imported ${r.length} real listing(s)`)}>
+                  {busy === "import" ? <span className="spinner" /> : "Import"}
+                </button>
+              </div>
+              <span>Real names, prices and photos from real stores. Checkout here stays PayPal sandbox (test money).</span>
+            </div>
+          )}
         </section>
 
         <div className="products">
           {state.products.map((p) => (
             <article key={p.id} className="product">
-              <div className={`product-img ${p.image}`}>{EMOJI[p.image] ?? "👟"}</div>
+              <div className={`product-img ${p.image}`}>{p.imageUrl ? <img src={p.imageUrl} alt={p.title} loading="lazy" /> : EMOJI[p.image] ?? "👟"}</div>
+              {p.source && <a className="real-tag" href={p.source.url} target="_blank" rel="noreferrer">Real listing · {p.source.domain} ↗</a>}
               <div className="product-row">
                 <h2>{p.title}</h2>
                 <span className={`stock ${p.inStock ? "in" : "out"}`}>{p.inStock ? "In stock" : "Sold out"}</span>

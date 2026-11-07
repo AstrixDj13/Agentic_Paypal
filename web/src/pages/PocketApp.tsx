@@ -2,31 +2,39 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   api, attrsText, fileToDataUrl, money, PRESET_LABEL, useAppState, useToast, when,
-  type AppState, type MandateDraft, type Purchase, type SignedMandate,
+  type AppState, type FindResult, type Purchase,
 } from "../api";
 import { BrandLockup } from "../components/Brand";
 import { Icon, type IconName } from "../components/Icon";
 import { FeedItem, MandateChips, StatusBadge, VerdictCard, type Act } from "../components/purchase";
 import { Money, Obj, Segmented, Sheet, Switch, Toast, useTheme } from "../components/ui";
 import { BlackBox, EvidenceSheet } from "./Console";
+import AgentPage from "./AgentPage";
+import { AgentOrb, agentStatus, activeMandate, pendingFor, unreadFor } from "../components/agent";
+import { JobSheet, MoveMoney, NewAgent } from "../components/agentSheets";
+import { LockScreen, SignButton, SignerProvider } from "../components/lock";
 
-type Tab = "home" | "rules" | "activity" | "blackbox";
+const UNLOCK_KEY = "pocket.unlocked";
+const readUnlocked = () => { try { return sessionStorage.getItem(UNLOCK_KEY) === "1"; } catch { return false; } };
+
+type Tab = "home" | "agent" | "activity" | "blackbox";
 export type SheetState =
-  | { kind: "pocket" }
-  | { kind: "rule" }
+  | { kind: "agent" }
+  | { kind: "job"; id: string }
+  | { kind: "move"; id: string }
   | { kind: "purchase"; id: string }
   | { kind: "wrong"; id: string }
   | { kind: "evidence"; id: string }
+  | { kind: "found"; id: string; result: FindResult }
   | null;
 
 const TABS: { tab: Tab; path: string; label: string; icon: IconName }[] = [
-  { tab: "home", path: "/", label: "Home", icon: "home" },
-  { tab: "rules", path: "/rules", label: "Rules", icon: "rules" },
+  { tab: "home", path: "/", label: "Agents", icon: "home" },
   { tab: "activity", path: "/activity", label: "Activity", icon: "activity" },
   { tab: "blackbox", path: "/console", label: "Black Box", icon: "box" },
 ];
 
-const tabFromPath = (p: string): Tab => (p.startsWith("/console") ? "blackbox" : p.startsWith("/rules") ? "rules" : p.startsWith("/activity") ? "activity" : "home");
+const tabFromPath = (p: string): Tab => (p.startsWith("/console") ? "blackbox" : p.startsWith("/agents/") ? "agent" : p.startsWith("/activity") ? "activity" : "home");
 
 export default function PocketApp() {
   const { state, refresh, error } = useAppState();
@@ -35,8 +43,21 @@ export default function PocketApp() {
   const { pathname, search } = useLocation();
   const navigate = useNavigate();
   const tab = tabFromPath(pathname);
+  const agentId = tab === "agent" ? decodeURIComponent(pathname.split("/")[2] ?? "") : "";
+  const openAgent = (id: string) => navigate(`/agents/${id}`);
   const [sheet, setSheet] = useState<SheetState>(null);
   const close = useCallback(() => setSheet(null), []);
+
+  // App lock: PIN pad on open (create a PIN the first time). Stays unlocked for this tab session.
+  const [lock, setLock] = useState<"checking" | "setup" | "unlock" | "open">(readUnlocked() ? "open" : "checking");
+  useEffect(() => {
+    if (lock !== "checking") return;
+    api<{ hasPin: boolean }>("/api/auth/status").then((s) => setLock(s.hasPin ? "unlock" : "setup")).catch(() => setLock("unlock"));
+  }, [lock]);
+  const unlocked = () => {
+    try { sessionStorage.setItem(UNLOCK_KEY, "1"); } catch { /* private mode: unlock for this view only */ }
+    setLock("open");
+  };
 
   // Return from PayPal approval (vault connect), and deep links like /console?p=<purchaseId>.
   useEffect(() => {
@@ -49,7 +70,8 @@ export default function PocketApp() {
   }, []);
 
   // Scroll back to top when switching tabs.
-  useEffect(() => { document.querySelector(".screen")?.scrollTo({ top: 0 }); }, [tab]);
+  // (An agent's chat scrolls itself to the latest message instead.)
+  useEffect(() => { if (tab !== "agent") document.querySelector(".screen")?.scrollTo({ top: 0 }); }, [tab]);
 
   const act: Act = async (fn, ok) => {
     try {
@@ -71,14 +93,17 @@ export default function PocketApp() {
 
   return (
     <div className="stage">
-      <div className={`device ${state?.killSwitch ? "paused" : ""}`}>
+      <div className={`device ${state?.killSwitch ? "paused" : ""} ${tab === "agent" ? "in-agent" : ""}`}>
+        {(lock === "setup" || lock === "unlock") && <LockScreen mode={lock} onDone={unlocked} />}
+        {lock === "checking" && <div className="lock" />}
+        <SignerProvider>
         <header className="brandbar">
           <BrandLockup product={tab === "blackbox" ? "Black Box" : "Pocket"} />
           <div className="row" style={{ gap: 8 }}>
             {state && tab !== "home" && (
               <div className={`kill-pill ${state.killSwitch ? "paused" : ""}`}>
-                <span>{state.killSwitch ? "Paused" : "Agent on"}</span>
-                <Switch on={!state.killSwitch} onChange={toggleKill} label="Agent can spend" />
+                <span>{state.killSwitch ? "All paused" : "Agents on"}</span>
+                <Switch on={!state.killSwitch} onChange={toggleKill} label="Agents can spend" />
               </div>
             )}
             <button className="icon-btn on-chrome" aria-label={dark ? "Switch to light mode" : "Switch to dark mode"} onClick={toggle}>
@@ -87,22 +112,22 @@ export default function PocketApp() {
           </div>
         </header>
 
-        <main className="screen">
+        <main className={`screen ${tab === "agent" ? "agent-screen" : ""}`}>
           {!state ? (
             <div className="card empty">
               {error ? <><Icon name="alert" size={22} /><p className="subhead">Can't reach the server.</p><p className="footnote muted">{error}</p></> : <><span className="spinner" /><p className="subhead muted">Loading your pocket…</p></>}
             </div>
           ) : (
             <>
-              {tab === "home" && <Home state={state} act={act} setSheet={setSheet} toggleKill={toggleKill} goActivity={() => navigate("/activity")} />}
-              {tab === "rules" && <Rules state={state} act={act} setSheet={setSheet} />}
+              {tab === "home" && <Home state={state} act={act} setSheet={setSheet} toggleKill={toggleKill} goActivity={() => navigate("/activity")} openAgent={openAgent} />}
+              {tab === "agent" && <AgentPage state={state} agentId={agentId} act={act} refresh={refresh} show={show} setSheet={setSheet} back={() => navigate("/")} />}
               {tab === "activity" && <Activity state={state} setSheet={setSheet} />}
               {tab === "blackbox" && <BlackBox state={state} show={show} openEvidence={(id) => setSheet({ kind: "evidence", id })} />}
             </>
           )}
         </main>
 
-        <nav className="tabbar glass" aria-label="Main">
+        {tab !== "agent" && <nav className="tabbar glass" aria-label="Main" style={{ gridTemplateColumns: `repeat(${TABS.length}, 1fr)` }}>
           {TABS.map((t) => (
             <button key={t.tab} className={tab === t.tab ? "on" : ""} aria-current={tab === t.tab ? "page" : undefined} onClick={() => navigate(t.path)}>
               <span className="tab-ico">
@@ -112,18 +137,21 @@ export default function PocketApp() {
               {t.label}
             </button>
           ))}
-        </nav>
+        </nav>}
 
         {state && sheet && (
           <Sheet onClose={close} key={sheet.kind + ("id" in sheet ? sheet.id : "")}>
-            {sheet.kind === "pocket" && <NewPocket act={act} close={close} />}
-            {sheet.kind === "rule" && <NewRule state={state} act={act} close={close} />}
+            {sheet.kind === "agent" && <NewAgent state={state} act={act} close={close} open={openAgent} />}
+            {sheet.kind === "job" && <JobSheet state={state} agentId={sheet.id} act={act} close={close} />}
+            {sheet.kind === "move" && <MoveMoney state={state} agentId={sheet.id} act={act} close={close} />}
             {sheet.kind === "purchase" && <PurchaseDetail state={state} id={sheet.id} act={act} setSheet={setSheet} openEvidence={openEvidence} />}
             {sheet.kind === "wrong" && <ReportWrong state={state} id={sheet.id} refresh={refresh} show={show} setSheet={setSheet} />}
             {sheet.kind === "evidence" && <EvidenceSheet state={state} id={sheet.id} />}
+            {sheet.kind === "found" && <FoundSheet state={state} result={sheet.result} setSheet={setSheet} />}
           </Sheet>
         )}
         <Toast toast={toast} />
+        </SignerProvider>
       </div>
     </div>
   );
@@ -131,7 +159,7 @@ export default function PocketApp() {
 
 /* ====================================== Home ====================================== */
 
-function Home({ state, act, setSheet, toggleKill, goActivity }: { state: AppState; act: Act; setSheet: (s: SheetState) => void; toggleKill: () => void; goActivity: () => void }) {
+function Home({ state, act, setSheet, toggleKill, goActivity, openAgent }: { state: AppState; act: Act; setSheet: (s: SheetState) => void; toggleKill: () => void; goActivity: () => void; openAgent: (id: string) => void }) {
   const total = state.pockets.reduce((s, p) => s + p.balance, 0);
   const connect = () => act(async () => {
     const { approveUrl } = await api<{ approveUrl: string }>("/api/paypal/connect", {});
@@ -141,7 +169,7 @@ function Home({ state, act, setSheet, toggleKill, goActivity }: { state: AppStat
   return (
     <>
       <section className="hero">
-        <p className="footnote muted">Fenced off for your agent</p>
+        <p className="footnote muted">Fenced off across {state.pockets.length} agent{state.pockets.length === 1 ? "" : "s"}</p>
         <Money value={total} />
         <div className="chips">
           <span className={`badge ${state.vault ? "ok" : "neutral"}`}><span className="dot" />{state.vault ? "PayPal connected" : "PayPal not connected"}</span>
@@ -151,8 +179,8 @@ function Home({ state, act, setSheet, toggleKill, goActivity }: { state: AppStat
 
       <div className={`kill-row glass ${state.killSwitch ? "paused" : ""}`}>
         <div className="grow">
-          <div className="headline">{state.killSwitch ? "Agent spending paused" : "Agent can spend"}</div>
-          <div className="footnote muted">{state.killSwitch ? "Nothing can be bought until you turn it back on" : "Kill switch: one tap stops every purchase"}</div>
+          <div className="headline">{state.killSwitch ? "All agents paused" : "Agents can spend"}</div>
+          <div className="footnote muted">{state.killSwitch ? "Nothing can be bought until you turn it back on" : "Kill switch: one tap stops every agent"}</div>
         </div>
         <Switch on={!state.killSwitch} onChange={toggleKill} label="Agent can spend" />
       </div>
@@ -169,28 +197,40 @@ function Home({ state, act, setSheet, toggleKill, goActivity }: { state: AppStat
       )}
 
       <div className="section-head">
-        <h2 className="section-title">Pockets</h2>
-        <button className="btn sm glass-btn" onClick={() => setSheet({ kind: "pocket" })}><Icon name="plus" size={16} />New</button>
+        <h2 className="section-title">Your agents</h2>
+        <button className="btn sm glass-btn" onClick={() => setSheet({ kind: "agent" })}><Icon name="plus" size={16} />New agent</button>
       </div>
       {state.pockets.length === 0 ? (
-        <button className="card empty tappable" onClick={() => setSheet({ kind: "pocket" })}>
-          <Obj kind="pocket" size={0.6} />
-          <p className="subhead">Create a pocket: a slice of money your agent can use.</p>
-          <p className="footnote muted">The rest of your PayPal stays out of reach.</p>
+        <button className="card empty tappable" onClick={() => setSheet({ kind: "agent" })}>
+          <div className="orb-row"><AgentOrb name="P" color="#0070e0" size={40} /><AgentOrb name="S" color="#e5489b" size={40} /><AgentOrb name="G" color="#19a35b" size={40} /></div>
+          <p className="subhead">Create your first agent: a name, some money and one job.</p>
+          <p className="footnote muted">Each agent only spends its own money, by rules you sign. The rest of your PayPal stays out of reach.</p>
         </button>
       ) : (
-        <div className="stack">
+        <div className="agent-grid">
           {state.pockets.map((p) => {
-            const rules = state.mandates.filter((m) => m.mandate.pocketId === p.id).length;
+            const st = agentStatus(state, p);
+            const job = activeMandate(state, p.id)?.mandate.item;
+            const unread = unreadFor(state, p);
+            const waiting = pendingFor(state, p.id) > 0;
             return (
-              <div key={p.id} className="pocket-card rise">
-                <div className="row between"><span className="headline">{p.name}</span><span className="caption">Agent pocket</span></div>
-                <Money value={p.balance} size="title" />
-                <span className="footnote">{rules} active rule{rules === 1 ? "" : "s"}</span>
-                <Obj kind="coin" size={0.85} />
-              </div>
+              <button key={p.id} className={`agent-tile rise ${p.paused ? "is-paused" : ""}`} style={{ "--orb": p.color } as React.CSSProperties} onClick={() => openAgent(p.id)}>
+                <div className="row between" style={{ alignItems: "flex-start" }}>
+                  <AgentOrb name={p.name} color={p.color} size={44} pulse={waiting} paused={p.paused} />
+                  {unread > 0 && <span className="dot-badge static">{unread}</span>}
+                </div>
+                <strong className="headline ellipsis">{p.name}</strong>
+                <span className="footnote muted clamp-2 capitalize">{job ?? "Needs a job"}</span>
+                <Money value={p.balance} size="body" />
+                <span className={`badge ${st.tone}`}><span className="dot" />{st.text}</span>
+              </button>
             );
           })}
+          <button className="agent-tile add" onClick={() => setSheet({ kind: "agent" })}>
+            <span className="add-orb"><Icon name="plus" size={22} /></span>
+            <strong className="headline">New agent</strong>
+            <span className="footnote muted">Name, money, one job</span>
+          </button>
         </div>
       )}
 
@@ -199,57 +239,10 @@ function Home({ state, act, setSheet, toggleKill, goActivity }: { state: AppStat
         {state.purchases.length > 0 && <button className="btn sm ghost" onClick={goActivity}>See all</button>}
       </div>
       {state.purchases.length === 0 ? (
-        <div className="card empty"><p className="subhead muted">Nothing yet. Write a rule, and your agent buys when it's allowed to.</p></div>
+        <div className="card empty"><p className="subhead muted">Nothing yet. Give an agent a job, and it buys when it's allowed to.</p></div>
       ) : (
         <div className="stack">{state.purchases.slice(0, 3).map((p) => <FeedItem key={p.id} p={p} onOpen={() => setSheet({ kind: "purchase", id: p.id })} />)}</div>
       )}
-    </>
-  );
-}
-
-/* ====================================== Rules ====================================== */
-
-function Rules({ state, act, setSheet }: { state: AppState; act: Act; setSheet: (s: SheetState) => void }) {
-  const [running, setRunning] = useState<string | null>(null);
-  const run = (m: SignedMandate) => {
-    setRunning(m.mandate.id);
-    act(async () => {
-      const r = await api<{ purchase?: Purchase; skipped?: string }>("/api/agent/run", { mandateId: m.mandate.id, mode: "careful" });
-      if (r.skipped) throw new Error(r.skipped);
-    }, "Agent checked the store").finally(() => setRunning(null));
-  };
-  return (
-    <>
-      <div className="page-head">
-        <h1 className="large-title">Rules</h1>
-        <button className="btn sm primary" disabled={!state.pockets.length} onClick={() => setSheet({ kind: "rule" })}><Icon name="plus" size={16} />New rule</button>
-      </div>
-      <p className="subhead muted">Signed once. Plain code enforces them at checkout, not the AI.</p>
-      {!state.pockets.length && <div className="card empty"><Obj kind="pocket" size={0.55} /><p className="subhead muted">Create a pocket first, then write a rule for it.</p></div>}
-      {state.pockets.length > 0 && state.mandates.length === 0 && (
-        <button className="card empty tappable" onClick={() => setSheet({ kind: "rule" })}>
-          <Obj kind="shield" size={0.55} />
-          <p className="subhead">Tell your agent what it may buy, in your own words.</p>
-        </button>
-      )}
-      <div className="stack">
-        {state.mandates.map((m) => (
-          <div key={m.mandate.id} className="card stack-sm rise">
-            <div className="row between">
-              <strong className="headline capitalize">{m.mandate.item}</strong>
-              <span className="badge blue"><Icon name="check" size={13} stroke={2.4} />Signed</span>
-            </div>
-            <MandateChips m={m.mandate} />
-            <p className="footnote muted">“{m.mandate.instruction}”</p>
-            <div className="row between">
-              <span className="mono muted">sig …{m.signature.slice(-12)}</span>
-              <button className="btn sm glass-btn" disabled={running === m.mandate.id} onClick={() => run(m)}>
-                {running === m.mandate.id ? <><span className="spinner" />Checking</> : "Check store now"}
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
     </>
   );
 }
@@ -289,101 +282,6 @@ function Activity({ state, setSheet }: { state: AppState; setSheet: (s: SheetSta
 
 /* ====================================== Sheets ====================================== */
 
-function NewPocket({ act, close }: { act: Act; close: () => void }) {
-  const [name, setName] = useState("Drops");
-  const [amount, setAmount] = useState("150");
-  return (
-    <div className="stack">
-      <div className="sheet-hero"><Obj kind="pocket" size={0.75} /></div>
-      <h2 className="title-2">New pocket</h2>
-      <p className="subhead muted">A slice of your money your agent can spend. It can never touch anything outside it.</p>
-      <label className="field">Name<input className="input" value={name} onChange={(e) => setName(e.target.value)} /></label>
-      <label className="field">Amount (USD)
-        <div className="amount-input"><span>$</span><input className="input big" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} /></div>
-      </label>
-      <div className="chips">
-        {[50, 100, 150, 250].map((v) => (
-          <button key={v} className={`chip btnlike ${Number(amount) === v ? "on" : ""}`} onClick={() => setAmount(String(v))}>${v}</button>
-        ))}
-      </div>
-      <button className="btn primary block" disabled={!name.trim() || !(Number(amount) > 0)} onClick={() => act(() => api("/api/pockets", { name, amount: Number(amount) }), `Pocket "${name}" created`).then(close)}>
-        Create pocket
-      </button>
-    </div>
-  );
-}
-
-function NewRule({ state, act, close }: { state: AppState; act: Act; close: () => void }) {
-  const [pocketId, setPocketId] = useState(state.pockets[0]?.id ?? "");
-  const [instruction, setInstruction] = useState("Running shoes, size 10, under $100, Nike or Adidas only, expires Nov 30");
-  const [draft, setDraft] = useState<MandateDraft | null>(null);
-  const [source, setSource] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  const parse = async () => {
-    setBusy(true);
-    setErr(null);
-    try {
-      const r = await api<{ draft: MandateDraft; source: string }>("/api/mandates/draft", { instruction });
-      setDraft(r.draft);
-      setSource(r.source);
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (!draft) {
-    return (
-      <div className="stack">
-        <div className="row between"><h2 className="title-2">New rule</h2><span className="caption muted">Step 1 of 2</span></div>
-        <p className="subhead muted">Say what your agent may buy, in your own words.</p>
-        <label className="field">Pocket
-          <select className="input" value={pocketId} onChange={(e) => setPocketId(e.target.value)}>
-            {state.pockets.map((p) => <option key={p.id} value={p.id}>{p.name} ({money(p.balance)})</option>)}
-          </select>
-        </label>
-        <textarea className="input textarea" value={instruction} onChange={(e) => setInstruction(e.target.value)} aria-label="Your rule in words" />
-        <p className="footnote muted">Try: “Concert tickets under $80 each, max 2, until Dec 15”</p>
-        {err && <p className="footnote danger-text">{err}</p>}
-        <button className="btn primary block" disabled={busy || !instruction.trim()} onClick={parse}>
-          {busy ? <><span className="spinner" />Reading your words…</> : "Turn into rules"}
-        </button>
-      </div>
-    );
-  }
-
-  const size = draft.required.size_us ?? "";
-  const brands = (draft.allowed.brand ?? []).join(", ");
-  const set = (patch: Partial<MandateDraft>) => setDraft({ ...draft, ...patch });
-  return (
-    <div className="stack">
-      <div className="row between">
-        <h2 className="title-2">Check the rules</h2>
-        <span className="badge blue"><Icon name={source === "ai" ? "sparkles" : "rules"} size={13} />{source === "ai" ? "Read by AI" : "Read by rules"}</span>
-      </div>
-      <p className="subhead muted">Your agent can only buy what matches these. Plain code enforces them at checkout, not the AI.</p>
-      <label className="field">Item<input className="input" value={draft.item} onChange={(e) => set({ item: e.target.value })} /></label>
-      <div className="row" style={{ gap: 12 }}>
-        <label className="field grow">US size<input className="input" value={size} onChange={(e) => set({ required: { ...draft.required, size_us: e.target.value } })} /></label>
-        <label className="field grow">Max price ($)<input className="input" inputMode="decimal" value={draft.maxUnitPrice} onChange={(e) => set({ maxUnitPrice: Number(e.target.value) })} /></label>
-      </div>
-      <div className="row" style={{ gap: 12 }}>
-        <label className="field grow">Brands<input className="input" value={brands} onChange={(e) => set({ allowed: { ...draft.allowed, brand: e.target.value.split(",").map((b) => b.trim().toLowerCase()).filter(Boolean) } })} /></label>
-        <label className="field" style={{ width: 96 }}>Max qty<input className="input" inputMode="numeric" value={draft.maxQuantity} onChange={(e) => set({ maxQuantity: Number(e.target.value) })} /></label>
-      </div>
-      <label className="field">Expires<input className="input" type="date" value={draft.expiresAt.slice(0, 10)} onChange={(e) => set({ expiresAt: new Date(`${e.target.value}T23:59:59Z`).toISOString() })} /></label>
-      <MandateChips m={draft} />
-      <button className="btn primary block" onClick={() => act(() => api("/api/mandates", { pocketId, instruction, draft }), "Rule approved and signed").then(close)}>
-        <Icon name="lock" size={18} />Approve &amp; sign
-      </button>
-      <button className="btn ghost block" onClick={() => setDraft(null)}>Back</button>
-    </div>
-  );
-}
-
 function PurchaseDetail({ state, id, act, setSheet, openEvidence }: { state: AppState; id: string; act: Act; setSheet: (s: SheetState) => void; openEvidence: (id: string) => void }) {
   const p = state.purchases.find((x) => x.id === id);
   if (!p) return <p className="subhead muted">Not found.</p>;
@@ -417,8 +315,54 @@ function PurchaseDetail({ state, id, act, setSheet, openEvidence }: { state: App
       </button>
       {p.paypal && <p className="mono muted">PayPal order {p.paypal.orderId}{p.paypal.captureId ? ` · capture ${p.paypal.captureId}` : ""}</p>}
 
-      {p.status === "needs_approval" && <button className="btn primary block" onClick={() => act(() => api(`/api/purchases/${p.id}/approve`, {}), "Approved")}>Approve this merchant &amp; buy</button>}
+      {p.status === "needs_approval" && (
+        <SignButton title={`Buy for ${money(p.total)}`} detail={p.title} onSigned={(auth) => act(() => api(`/api/purchases/${p.id}/approve`, { auth }), "Approved")}>Sign &amp; buy</SignButton>
+      )}
       {p.status === "completed" && <button className="btn danger block" onClick={() => setSheet({ kind: "wrong", id: p.id })}>Something's wrong</button>}
+    </div>
+  );
+}
+
+/** Real listings the agent looked at, why each did or didn't fit, and what happened next. */
+function FoundSheet({ state, result, setSheet }: { state: AppState; result: FindResult; setSheet: (s: SheetState) => void }) {
+  const fits = result.found.filter((f) => f.reasons.length === 0).length;
+  const p = result.purchase ? state.purchases.find((x) => x.id === result.purchase!.id) ?? result.purchase : undefined;
+  return (
+    <div className="stack">
+      <h2 className="title-2">Real stores, checked</h2>
+      <p className="subhead muted">
+        Your agent searched {result.found.length} real listings via Channel3. {fits} {fits === 1 ? "proves it matches" : "prove they match"} your rules; plain code checked every one.
+      </p>
+      {p ? (
+        <button className="card tappable stack-sm" style={{ textAlign: "left" }} onClick={() => setSheet({ kind: "purchase", id: p.id })}>
+          <div className="row between"><StatusBadge status={p.status} /><Money value={p.total} size="body" /></div>
+          <strong className="headline">{p.title}</strong>
+          <span className="footnote muted">Paid with test money (PayPal sandbox) at Stride Supply checkout. Tap for details.</span>
+        </button>
+      ) : (
+        result.skipped && <div className="card callout warn"><p className="subhead">{result.skipped}</p></div>
+      )}
+      <ul className="found-list">
+        {result.found.map(({ product: x, reasons }) => {
+          const chosen = p?.productId === x.id;
+          return (
+            <li key={x.id} className={`found-item ${reasons.length ? "no" : "ok"} ${chosen ? "chosen" : ""}`}>
+              {x.imageUrl ? <img src={x.imageUrl} alt="" loading="lazy" /> : <div className="found-ph" />}
+              <div className="grow stack-xs">
+                <div className="row between" style={{ alignItems: "flex-start", gap: 8 }}>
+                  <strong className="footnote">{x.title}</strong>
+                  <strong className="footnote">{money(x.unitPrice)}</strong>
+                </div>
+                <span className="caption muted">{x.attributes.brand ?? "Unknown brand"} · {x.source?.domain}</span>
+                {reasons.length === 0
+                  ? <span className="caption ok-text">{chosen ? "✓ Fits your rules · chosen" : "✓ Fits your rules"}</span>
+                  : <span className="caption danger-text">✕ {reasons.join(" · ")}</span>}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="caption muted">Real products and prices from Channel3. Payment is PayPal sandbox (test money), so nothing is really shipped.</p>
     </div>
   );
 }

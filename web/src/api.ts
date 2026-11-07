@@ -4,15 +4,39 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 export type Attributes = Record<string, string>;
 
-export interface Pocket { id: string; name: string; balance: number; currency: "USD" }
+export type AskMode = "anything" | "money";
+
+/** A pocket is an agent: its own money, name, colour and one job. */
+export interface Pocket {
+  id: string; name: string; balance: number; currency: "USD";
+  color?: string; askMode?: AskMode; paused?: boolean; lastReadAt?: string; createdAt?: string;
+}
+
+export interface DiffRow { label: string; from: string; to: string }
+export interface Proposal {
+  id: string; agentId: string; kind: "rule_change" | "transfer" | "job";
+  instruction?: string;
+  status: "pending" | "approved" | "declined" | "superseded";
+  summary: string; diff: DiffRow[];
+  scope?: "once" | "until" | "always"; until?: string;
+  fromAgentId?: string; amount?: number; retryProductId?: string;
+  createdAt: string; decidedAt?: string;
+}
+export interface ChatMessage {
+  id: string; agentId: string; from: "user" | "agent" | "system"; text: string; at: string;
+  needsYou?: boolean; proposalId?: string; purchaseId?: string;
+}
+export interface ActiveException { agentId: string; baseMandateId: string; tempMandateId: string; scope: "once" | "until"; until?: string; proposalId: string }
 
 export interface Mandate {
   id: string; pocketId: string; instruction: string; item: string;
   required: Attributes; allowed: Record<string, string[]>;
   maxUnitPrice: number; maxQuantity: number; merchants: string[]; expiresAt: string; createdAt: string;
+  /** Words that must never appear in what is bought ("not paprika"). */
+  avoid?: string[];
 }
 export interface SignedMandate { mandate: Mandate; publicKey: string; signature: string }
-export type MandateDraft = Pick<Mandate, "item" | "required" | "allowed" | "maxUnitPrice" | "maxQuantity" | "expiresAt">;
+export type MandateDraft = Pick<Mandate, "item" | "required" | "allowed" | "maxUnitPrice" | "maxQuantity" | "expiresAt" | "avoid">;
 
 export interface ProposedOrder {
   mandateId: string; merchantId: string; productId: string; title: string;
@@ -45,6 +69,15 @@ export interface Purchase {
 export interface Product {
   id: string; title: string; attributes: Attributes; unitPrice: number; inStock: boolean;
   listingText: string; hiddenText?: string; image: string; shipsAs?: Attributes;
+  imageUrl?: string;
+  source?: { kind: "channel3"; productId: string; url: string; domain: string; sizes: string[]; fetchedAt: string };
+}
+
+/** Result of "Find it for me": real listings (Channel3) with why each does or doesn't fit, plus what the agent did. */
+export interface FindResult {
+  found: { product: Product; reasons: string[] }[];
+  purchase?: Purchase;
+  skipped?: string;
 }
 
 export interface AppState {
@@ -54,6 +87,8 @@ export interface AppState {
   pockets: Pocket[]; mandates: SignedMandate[]; retiredMandates: SignedMandate[]; purchases: Purchase[];
   ai: { provider: string; model: string; enabled: boolean; calls: number; lastError?: string };
   products: Product[]; photoPresets: string[];
+  channel3: { enabled: boolean };
+  chats: ChatMessage[]; proposals: Proposal[]; exceptions: ActiveException[];
 }
 
 export interface LedgerEntry { seq: number; ts: string; purchaseId: string; kind: string; payload: any; prevHash: string; hash: string }

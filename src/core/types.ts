@@ -18,6 +18,8 @@ export interface Mandate {
   maxUnitPrice: number;
   currency: "USD";
   maxQuantity: number;
+  /** Words that must not appear in what is bought, e.g. ["paprika"] for "chilli powder, not paprika". */
+  avoid?: string[];
   /** Merchant ids the agent may buy from. Empty = any agent-ready merchant. */
   merchants: string[];
   expiresAt: string; // ISO
@@ -32,11 +34,25 @@ export interface SignedMandate {
   signature: string;
 }
 
+/** "Ask me about anything" = every purchase needs a tap; "only ask about money" = buys inside the rules on its own. */
+export type AskMode = "anything" | "money";
+
+/**
+ * A pocket is an agent: its own money, its own name and colour, one job (one active signed mandate).
+ * Fields after `currency` are optional so older saved state still loads.
+ */
 export interface Pocket {
   id: string;
   name: string;
   balance: number;
   currency: "USD";
+  color?: string;
+  askMode?: AskMode;
+  /** Per-agent kill switch. */
+  paused?: boolean;
+  /** Chat messages after this time count as unread. */
+  lastReadAt?: string;
+  createdAt?: string;
 }
 
 /** What the agent says it is buying. The guard only ever sees this claim. */
@@ -58,6 +74,8 @@ export interface GuardState {
   purchasesToday: number;
   /** Merchants the user has already approved at least once. */
   knownMerchants: string[];
+  /** The user set this agent to "ask me about anything": every purchase needs a tap. */
+  askEveryPurchase?: boolean;
 }
 
 /** What the product page actually said when the agent looked at it. */

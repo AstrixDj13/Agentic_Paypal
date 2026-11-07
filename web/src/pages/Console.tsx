@@ -50,7 +50,7 @@ export function BlackBox({ state, show, openEvidence }: { state: AppState; show:
         options={[{ value: "evidence", label: "Evidence" }, { value: "recorder", label: "Recorder" }, { value: "merchant", label: "Merchant" }]}
       />
 
-      {view === "evidence" && <EvidenceList purchases={state.purchases} onOpen={openEvidence} />}
+      {view === "evidence" && <EvidenceList purchases={state.purchases} agents={state.pockets} onOpen={openEvidence} />}
       {view === "recorder" && (ledger ? (
         <Recorder
           ledger={ledger}
@@ -82,7 +82,7 @@ function Tiles({ state }: { state: AppState }) {
   const ps = state.purchases;
   const sum = (f: (p: Purchase) => boolean) => ps.filter(f).reduce((s, p) => s + p.total, 0);
   const tiles = [
-    { label: "In agent pockets", v: money(state.pockets.reduce((s, p) => s + p.balance, 0)) },
+    { label: `Across ${state.pockets.length} agents`, v: money(state.pockets.reduce((s, p) => s + p.balance, 0)) },
     { label: "Agent purchases", v: String(ps.filter((p) => p.paypal).length) },
     { label: "Blocked by guard", v: String(ps.filter((p) => p.status === "blocked").length), tone: "danger" },
     { label: "Kill switch", v: state.killSwitch ? "On" : "Off", tone: state.killSwitch ? "danger" : undefined },
@@ -110,7 +110,7 @@ function GuardBadge({ p }: { p: Purchase }) {
   return <span className="badge warn"><Icon name="clock" size={13} />Asked you</span>;
 }
 
-function EvidenceList({ purchases, onOpen }: { purchases: Purchase[]; onOpen: (id: string) => void }) {
+function EvidenceList({ purchases, agents, onOpen }: { purchases: Purchase[]; agents: AppState["pockets"]; onOpen: (id: string) => void }) {
   if (!purchases.length) return <div className="card empty"><p className="subhead muted">No agent purchases yet. They appear here the moment the agent tries to buy.</p></div>;
   return (
     <div className="stack">
@@ -121,6 +121,7 @@ function EvidenceList({ purchases, onOpen }: { purchases: Purchase[]; onOpen: (i
             <div className="row between"><StatusBadge status={p.status} /><span className="caption muted">{when(p.createdAt)}</span></div>
             <div className="row between feed-title"><span className="grow ellipsis">{p.title}</span><span className="num">{money(p.total)}</span></div>
             <div className="chips">
+              {(() => { const a = agents.find((x) => x.id === p.pocketId); return a ? <span className="badge neutral"><span className="dot" style={{ color: a.color }} />{a.name}</span> : null; })()}
               <GuardBadge p={p} />
               {v && <span className={`badge ${verdictTone(v)}`}>{VERDICT_LABEL[v]}</span>}
               <span className="badge neutral">{p.mode === "naive" ? "naive* agent" : "careful agent"}</span>

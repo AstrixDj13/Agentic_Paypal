@@ -24,6 +24,10 @@ export interface Product {
   /** Text hidden from humans (e.g. white-on-white) but read by agents. */
   hiddenText?: string;
   image: string;
+  /** Real product photo (Channel3 imports). */
+  imageUrl?: string;
+  /** Where a real product came from. Absent for the three built-in demo listings. */
+  source?: { kind: "channel3"; productId: string; url: string; domain: string; sizes: string[]; fetchedAt: string };
   /** Demo knob: what the warehouse actually ships for this product. Defaults to the listed attributes. */
   shipsAs?: Attributes;
 }
@@ -78,6 +82,16 @@ export function updateProduct(id: string, patch: Partial<Product>): Product {
   return p;
 }
 
+/** Adds (or refreshes) real products found via Channel3. Returns the stored listings. */
+export function importProducts(list: Product[]): Product[] {
+  return list.map((p) => {
+    const existing = getProduct(p.id);
+    if (existing) return Object.assign(existing, { ...p, shipsAs: existing.shipsAs });
+    products.push(p);
+    return p;
+  });
+}
+
 export function resetCatalog(): void {
   products = structuredClone(INITIAL);
 }
@@ -85,7 +99,7 @@ export function resetCatalog(): void {
 /** What the agent "saw": everything an agent would read on the page, including hidden text. */
 export function snapshotOf(p: Product, baseUrl: string, now = new Date()): PageSnapshot {
   return {
-    url: `${baseUrl}/store/${p.id}`,
+    url: p.source?.url ?? `${baseUrl}/store/${p.id}`,
     merchantId: MERCHANT_ID,
     productId: p.id,
     title: p.title,

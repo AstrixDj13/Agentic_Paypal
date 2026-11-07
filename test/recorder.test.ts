@@ -30,3 +30,12 @@ test("per-purchase lookup", () => {
   assert.equal(r.forPurchase("p1").length, 4);
   assert.equal(r.latest<typeof claim>("p1", "agent_claim")?.productId, "pegasus-41");
 });
+
+test("recorded payloads are sealed copies: mutating the original later does not break the chain", () => {
+  const r = new FlightRecorder();
+  const proposal = { id: "pr_1", status: "pending" };
+  r.append("a", "proposal", proposal);
+  proposal.status = "approved";
+  assert.equal(r.verify().ok, true);
+  assert.equal((r.all()[0].payload as { status: string }).status, "pending");
+});

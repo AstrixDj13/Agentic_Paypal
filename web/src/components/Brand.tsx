@@ -8,7 +8,7 @@
 const MARK_SRC: string | null = null;     // e.g. "/brand/paypal-mark.svg"
 const WORDMARK_SRC: string | null = null; // e.g. "/brand/paypal-wordmark-white.svg"
 
-function Mark({ size }: { size: number }) {
+export function Mark({ size }: { size: number }) {
   if (MARK_SRC) return <img src={MARK_SRC} width={size} height={size} alt="" />;
   return (
     <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true">

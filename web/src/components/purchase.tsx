@@ -4,6 +4,7 @@ import {
 } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { Money, Obj } from "./ui";
+import { SignButton } from "./lock";
 
 export type Act = (fn: () => Promise<unknown>, ok?: string) => Promise<void>;
 
@@ -59,11 +60,12 @@ export function FeedItem({ p, onOpen }: { p: Purchase; onOpen: () => void }) {
   );
 }
 
-export function MandateChips({ m }: { m: Pick<MandateDraft, "required" | "allowed" | "maxUnitPrice" | "maxQuantity" | "expiresAt"> }) {
+export function MandateChips({ m }: { m: Pick<MandateDraft, "required" | "allowed" | "maxUnitPrice" | "maxQuantity" | "expiresAt" | "avoid"> }) {
   return (
     <div className="chips">
       {Object.entries(m.required).map(([k, v]) => <span key={k} className="chip">{prettyKey(k)}: {v}</span>)}
       {Object.entries(m.allowed).map(([k, v]) => <span key={k} className="chip">{prettyKey(k)}: {v.join(" / ")}</span>)}
+      {(m.avoid ?? []).map((w) => <span key={`no-${w}`} className="chip chip-no">never {w}</span>)}
       <span className="chip">≤ {money(m.maxUnitPrice)}</span>
       <span className="chip">max {m.maxQuantity}</span>
       <span className="chip">until {new Date(m.expiresAt).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
@@ -124,9 +126,9 @@ export function VerdictCard({ p, act }: { p: Purchase; act?: Act }) {
               <p className="subhead">New rule: <strong>{r.proposedFix.item}</strong></p>
               <p className="footnote muted">{r.proposedFix.note}</p>
               {act && (
-                <button className="btn primary block" onClick={() => act(() => api(`/api/purchases/${p.id}/apply-fix`, {}), "Sharper rule signed")}>
+                <SignButton title="Sign the sharper rule" detail={r.proposedFix.item} onSigned={(auth) => act(() => api(`/api/purchases/${p.id}/apply-fix`, { auth }), "Sharper rule signed")}>
                   Approve &amp; sign new rule
-                </button>
+                </SignButton>
               )}
             </>
           )}

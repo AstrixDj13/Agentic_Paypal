@@ -8,7 +8,7 @@ import { MERCHANT_ID, type Product } from "../store/catalog.ts";
  * 1. Mandate engine: plain words -> structured rules (user approves + signs afterwards)
  * ==================================================================================== */
 
-export type MandateDraft = Pick<Mandate, "item" | "required" | "allowed" | "maxUnitPrice" | "maxQuantity" | "expiresAt">;
+export type MandateDraft = Pick<Mandate, "item" | "required" | "allowed" | "maxUnitPrice" | "maxQuantity" | "expiresAt"> & { avoid?: string[] };
 
 const KNOWN_BRANDS = ["nike", "adidas", "puma", "asics", "new balance", "hoka", "brooks", "reebok", "on"];
 
@@ -18,7 +18,8 @@ export async function parseInstruction(instruction: string, now = new Date()): P
 Today is ${now.toISOString().slice(0, 10)}. Output JSON with keys:
 item (short noun phrase), required (object of exact attribute values; use size_us for US shoe size),
 allowed (object mapping attribute -> array of allowed lowercase values, e.g. {"brand":["nike","adidas"]}),
-maxUnitPrice (number, USD), maxQuantity (integer, default 1), expiresAt (ISO 8601 end of day UTC; default 30 days from today).
+maxUnitPrice (number, USD), maxQuantity (integer, default 1), expiresAt (ISO 8601 end of day UTC; default 30 days from today),
+avoid (array of lowercase words the user excluded, e.g. "not paprika" -> ["paprika"]; empty if none).
 Only include constraints the user actually stated.`,
     instruction,
   );
@@ -39,8 +40,10 @@ export function sanitizeDraft(ai: any, now: Date = new Date()): MandateDraft | n
     if (list.length) allowed[k] = list;
   }
   const exp = new Date(ai.expiresAt);
+  const avoid = (Array.isArray(ai.avoid) ? ai.avoid : ai.avoid ? [ai.avoid] : []).map((x: unknown) => String(x).trim().toLowerCase()).filter(Boolean).slice(0, 10);
   return {
     item: String(ai.item),
+    avoid,
     required,
     allowed,
     maxUnitPrice: price,
@@ -53,12 +56,17 @@ export function sanitizeDraft(ai: any, now: Date = new Date()): MandateDraft | n
 export function parseWithRules(text: string, now = new Date()): MandateDraft {
   const t = text.toLowerCase();
   const size = t.match(/size\s*(?:us\s*)?(\d+(?:\.\d)?)/)?.[1];
-  const price = t.match(/(?:under|below|max(?:imum)?|up to|<)\s*\$?\s*(\d+(?:\.\d+)?)/)?.[1];
+  const price =
+    t.match(/(?:under|below|max(?:imum)?|up to|<)\s*\$?\s*(\d+(?:\.\d+)?)/)?.[1] ??
+    t.match(/\$\s*(\d+(?:\.\d+)?)/)?.[1] ??
+    t.match(/(\d+(?:\.\d+)?)\s*(?:dollars|usd|bucks)\b/)?.[1];
   const qty = t.match(/(\d+)\s*(?:pairs?|items?|units?)/)?.[1];
   const brands = KNOWN_BRANDS.filter((b) => new RegExp(`\\b${b}\\b`).test(t));
-  const item = text.split(/[,.]/)[0].replace(/^(buy|get|find)\s+/i, "").replace(/size.*$/i, "").trim() || "item";
+  const avoid = [...t.matchAll(/\b(?:not|no|except|without|never)\s+([a-z][a-z -]{1,30}?)(?=\s+(?:for|under|below|at|and|or|,)|[,.!]|$)/g)].map((x) => x[1].trim()).filter((w) => !/^(more|over|less|than|a|the)$/.test(w));
+  const item = text.split(/[,.]/)[0].replace(/^(buy|get|find)\s+/i, "").replace(/\s+(?:and\s+)?(?:not|no|except|without)\s+.*$/i, "").replace(/\s+(?:for|under|below|at)\s+\$?\d.*$/i, "").replace(/size.*$/i, "").trim() || "item";
   return {
     item,
+    avoid,
     required: size ? { size_us: size } : {},
     allowed: brands.length ? { brand: brands } : {},
     maxUnitPrice: price ? Number(price) : 100,
@@ -92,11 +100,13 @@ export interface AgentChoice {
   order: ProposedOrder | null;
   /** Why nothing was bought, when order is null. */
   skipped?: string;
+  /** Fits every rule except the price: the agent stops and tells the user instead of staying silent. */
+  nearMiss?: { product: Product; overBy: number };
 }
 
 export async function chooseProduct(m: Mandate, candidates: Product[], mode: AgentMode): Promise<AgentChoice> {
   const inStock = candidates.filter((p) => p.inStock);
-  if (inStock.length === 0) return { order: null, skipped: "Nothing in stock yet; still watching." };
+  if (inStock.length === 0) return { order: null, skipped: "Nothing in stock yet. I'll keep watching." };
 
   for (const p of inStock) {
     const order = mode === "naive" ? naiveRead(m, p) : carefulRead(m, p);
@@ -105,15 +115,55 @@ export async function chooseProduct(m: Mandate, candidates: Product[], mode: Age
       return { order };
     }
   }
-  return { order: null, skipped: "No in-stock listing satisfies the mandate." };
+  if (mode === "careful") {
+    const near = inStock
+      .filter((p) => { const r = fitReasons(m, p); return r.length === 1 && p.unitPrice > m.maxUnitPrice; })
+      .sort((a, b) => a.unitPrice - b.unitPrice)[0];
+    if (near) return { order: null, skipped: `${near.title} fits everything except the price ($${near.unitPrice} > $${m.maxUnitPrice}).`, nearMiss: { product: near, overBy: Math.round((near.unitPrice - m.maxUnitPrice) * 100) / 100 } };
+  }
+  return { order: null, skipped: "Nothing in the store matches your rules yet. I'll keep watching." };
 }
+
+/** Significant words, lightly stemmed: "Running Shoes" -> ["running", "shoe"]. */
+const STOP = new Set(["and", "the", "for", "with", "only", "new", "any", "item", "items", "pair", "pairs", "pack", "under", "not"]);
+const words = (t: string) => t.toLowerCase().match(/[a-z]{3,}/g)?.filter((w) => !STOP.has(w)).map((w) => w.replace(/(?:es|s)$/, "")) ?? [];
+
+/** Does the listing look like the job at all? Shoes are not groceries. */
+export function matchesJob(m: Mandate, p: Product): boolean {
+  const want = words(m.item);
+  if (!want.length) return true;
+  const have = new Set(words(`${p.title} ${p.listingText}`));
+  return want.some((w) => have.has(w));
+}
+
+const avoided = (m: Mandate, p: Product) => (m.avoid ?? []).find((w) => `${p.title} ${p.listingText}`.toLowerCase().includes(w.toLowerCase()));
 
 function carefulRead(m: Mandate, p: Product): ProposedOrder | null {
   const a = p.attributes;
+  if (!matchesJob(m, p) || avoided(m, p)) return null;
   for (const [k, v] of Object.entries(m.required)) if (normalizeValue(a[k] ?? "") !== normalizeValue(v)) return null;
   for (const [k, opts] of Object.entries(m.allowed)) if (!opts.map(normalizeValue).includes(normalizeValue(a[k] ?? ""))) return null;
   if (p.unitPrice > m.maxUnitPrice) return null;
   return baseOrder(m, p, { ...a }, p.unitPrice, 1);
+}
+
+/** Plain-language reasons a listing does NOT fit the rules (empty = it fits). Shown to the user. */
+export function fitReasons(m: Mandate, p: Product): string[] {
+  const out: string[] = [];
+  const a = p.attributes;
+  if (!matchesJob(m, p)) out.push(`Not ${m.item}`);
+  for (const [k, v] of Object.entries(m.required)) {
+    if (a[k] === undefined) out.push(k === "size_us" ? `Size ${v} not listed` : `${k.replace("_", " ")} not listed`);
+    else if (normalizeValue(a[k]) !== normalizeValue(v)) out.push(`${k.replace("_", " ")} is ${a[k]}, not ${v}`);
+  }
+  for (const [k, opts] of Object.entries(m.allowed)) {
+    if (!opts.map(normalizeValue).includes(normalizeValue(a[k] ?? ""))) out.push(`${k} ${a[k] ?? "unknown"} not allowed`);
+  }
+  const no = avoided(m, p);
+  if (no) out.push(`You said no "${no}"`);
+  if (p.unitPrice > m.maxUnitPrice) out.push(`$${p.unitPrice} is over your $${m.maxUnitPrice} limit`);
+  if (!p.inStock) out.push("Out of stock");
+  return out;
 }
 
 function naiveRead(m: Mandate, p: Product): ProposedOrder | null {
