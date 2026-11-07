@@ -1,83 +1,81 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { AgGridReact } from "ag-grid-react";
-import type { ColDef, ICellRendererParams } from "ag-grid-community";
+import { useCallback, useEffect, useState } from "react";
 import {
-  api, money, prettyKey, STATUS_LABEL, useAppState, useToast, VERDICT_LABEL, when,
+  api, money, prettyKey, VERDICT_LABEL, when,
   type AppState, type LedgerEntry, type Mandate, type Purchase, type VerifyResult,
 } from "../api";
-import { gridTheme } from "../gridTheme";
-import { VerdictCard } from "./PocketApp";
+import { Icon } from "../components/Icon";
+import { StatusBadge, STORE_NAME, VerdictCard, verdictTone } from "../components/purchase";
+import { Obj, Segmented } from "../components/ui";
 
-type Tab = "purchases" | "ledger" | "merchant";
+type Ledger = { entries: LedgerEntry[]; verify: VerifyResult };
+type View = "evidence" | "recorder" | "merchant";
 
-export default function Console() {
-  const { state, refresh } = useAppState(2500);
-  const { toast, show } = useToast();
-  const [tab, setTab] = useState<Tab>("purchases");
-  const [selected, setSelected] = useState<string | null>(() => new URLSearchParams(location.search).get("p"));
-  const [ledger, setLedger] = useState<{ entries: LedgerEntry[]; verify: VerifyResult } | null>(null);
-
-  const loadLedger = useCallback(async () => setLedger(await api("/api/ledger")), []);
+/** Polls the hash-chained flight record. */
+function useLedger(intervalMs = 3000) {
+  const [ledger, setLedger] = useState<Ledger | null>(null);
+  const load = useCallback(async () => {
+    try { setLedger(await api<Ledger>("/api/ledger")); } catch { /* keep last good copy */ }
+  }, []);
   useEffect(() => {
-    loadLedger();
-    const t = setInterval(loadLedger, 3000);
+    load();
+    const t = setInterval(load, intervalMs);
     return () => clearInterval(t);
-  }, [loadLedger]);
+  }, [load, intervalMs]);
+  return { ledger, load };
+}
 
-  if (!state) return <div className="page muted">Loading…</div>;
-  const sel = state.purchases.find((p) => p.id === selected) ?? null;
+/* ====================================== Black Box tab ====================================== */
+
+export function BlackBox({ state, show, openEvidence }: { state: AppState; show: (t: string, e?: boolean) => void; openEvidence: (id: string) => void }) {
+  const [view, setView] = useState<View>("evidence");
+  const { ledger, load } = useLedger();
 
   return (
-    <div className="page">
-      <div className="row between wrap">
-        <div>
-          <h2>Black Box</h2>
-          <p className="small muted">Every agent purchase, sealed in a tamper-evident flight record. Rules decide, AI explains, PayPal pays.</p>
+    <>
+      <section className="bb-hero rise">
+        <div className="grow stack-sm">
+          <span className="kicker">Flight recorder</span>
+          <h1 className="title-2">Every agent purchase, sealed.</h1>
+          <p className="footnote">Rules decide, AI explains, PayPal pays. Edit one entry and the chain breaks.</p>
+          <ChainBadge verify={ledger?.verify} />
         </div>
-        <ChainBadge verify={ledger?.verify} />
-      </div>
+        <Obj kind="box" size={0.7} />
+      </section>
 
       <Tiles state={state} />
 
-      <div className="tabs">
-        <button className={tab === "purchases" ? "active" : ""} onClick={() => setTab("purchases")}>Evidence ledger</button>
-        <button className={tab === "ledger" ? "active" : ""} onClick={() => setTab("ledger")}>Flight recorder</button>
-        <button className={tab === "merchant" ? "active" : ""} onClick={() => setTab("merchant")}>Merchant view</button>
-      </div>
+      <Segmented<View>
+        value={view}
+        onChange={setView}
+        options={[{ value: "evidence", label: "Evidence" }, { value: "recorder", label: "Recorder" }, { value: "merchant", label: "Merchant" }]}
+      />
 
-      {tab === "purchases" && (
-        <>
-          <PurchasesGrid purchases={state.purchases} onSelect={setSelected} />
-          {sel ? <PurchaseEvidence p={sel} state={state} entries={ledger?.entries ?? []} /> : <p className="small muted">Select a row to replay its flight record.</p>}
-        </>
-      )}
-      {tab === "ledger" && ledger && (
-        <LedgerView
+      {view === "evidence" && <EvidenceList purchases={state.purchases} onOpen={openEvidence} />}
+      {view === "recorder" && (ledger ? (
+        <Recorder
           ledger={ledger}
-          onTamper={async (seq) => {
-            const v = await api<VerifyResult>("/api/ledger/tamper", { seq });
-            show(v.ok ? "Chain still valid" : `Tampering detected at entry #${v.brokenAt}`, !v.ok);
-            loadLedger();
-          }}
           onVerify={async () => {
             const v = await api<VerifyResult>("/api/ledger/verify");
             show(v.ok ? `Chain intact: ${v.checked} entries verified` : `Chain broken at entry #${v.brokenAt}`, !v.ok);
-            loadLedger();
+            load();
+          }}
+          onTamper={async (seq) => {
+            const v = await api<VerifyResult>("/api/ledger/tamper", { seq });
+            show(v.ok ? "Chain still valid" : `Tampering detected at entry #${v.brokenAt}`, !v.ok);
+            load();
           }}
         />
-      )}
-      {tab === "merchant" && <MerchantView purchases={state.purchases} />}
-      <div className="row"><button className="btn sm ghost" onClick={refresh}>Refresh</button></div>
-      {toast && <div className={`toast ${toast.error ? "error" : ""}`}>{toast.text}</div>}
-    </div>
+      ) : <div className="card empty"><span className="spinner" /></div>)}
+      {view === "merchant" && <MerchantView purchases={state.purchases} />}
+    </>
   );
 }
 
 function ChainBadge({ verify }: { verify?: VerifyResult }) {
   if (!verify) return null;
   return verify.ok
-    ? <span className="badge ok" style={{ fontSize: 13, padding: "6px 12px" }}>🔒 Chain intact · {verify.checked} entries</span>
-    : <span className="badge danger" style={{ fontSize: 13, padding: "6px 12px" }}>⚠ Tampering detected at entry #{verify.brokenAt}</span>;
+    ? <span className="chain-badge ok"><Icon name="lock" size={14} />Chain intact · {verify.checked} entries</span>
+    : <span className="chain-badge broken"><Icon name="alert" size={14} />Tampering detected at entry #{verify.brokenAt}</span>;
 }
 
 function Tiles({ state }: { state: AppState }) {
@@ -86,73 +84,60 @@ function Tiles({ state }: { state: AppState }) {
   const tiles = [
     { label: "In agent pockets", v: money(state.pockets.reduce((s, p) => s + p.balance, 0)) },
     { label: "Agent purchases", v: String(ps.filter((p) => p.paypal).length) },
-    { label: "Blocked by guard", v: String(ps.filter((p) => p.status === "blocked").length) },
-    { label: "Refunded by merchants", v: money(sum((p) => p.dispute?.resolution?.type === "refund")) },
-    { label: "Paid by Agent Cover Pool", v: money(sum((p) => p.dispute?.resolution?.type === "payout")) },
-    { label: "Kill switch", v: state.killSwitch ? "ON" : "off" },
+    { label: "Blocked by guard", v: String(ps.filter((p) => p.status === "blocked").length), tone: "danger" },
+    { label: "Kill switch", v: state.killSwitch ? "On" : "Off", tone: state.killSwitch ? "danger" : undefined },
+    { label: "Refunded by merchants", v: money(sum((p) => p.dispute?.resolution?.type === "refund")), tone: "ok" },
+    { label: "Paid by Cover Pool", v: money(sum((p) => p.dispute?.resolution?.type === "payout")), tone: "info" },
   ];
   return (
     <div className="tiles">
-      {tiles.map((t) => <div key={t.label} className="tile"><div className="xs muted">{t.label}</div><div className="v">{t.v}</div></div>)}
+      {tiles.map((t) => (
+        <div key={t.label} className={`tile ${t.tone ? `tone-${t.tone}` : ""}`}>
+          <span className="caption muted">{t.label}</span>
+          <span className="tile-v num">{t.v}</span>
+        </div>
+      ))}
     </div>
   );
 }
 
-/* ------------------------------------ Purchases grid ------------------------------------ */
+/* ------------------------------------ Evidence list ------------------------------------ */
 
-const StatusCell = (p: ICellRendererParams<Purchase>) => {
-  if (!p.data) return null;
-  const s = STATUS_LABEL[p.data.status];
-  return <span className={`badge ${s.tone}`}>{s.text}</span>;
-};
-const GuardCell = (p: ICellRendererParams<Purchase>) => {
-  const o = p.data?.decision.outcome;
-  return <span className={`badge ${o === "allow" ? "ok" : o === "block" ? "danger" : "warn"}`}>{o === "allow" ? "allowed" : o === "block" ? `blocked ×${p.data!.decision.violations.length}` : "ask user"}</span>;
-};
-const VerdictCell = (p: ICellRendererParams<Purchase>) => {
-  const v = p.data?.dispute?.result.verdict;
-  return v ? <span className={`badge ${v === "MERCHANT_AT_FAULT" ? "info" : v === "AGENT_AT_FAULT" ? "warn" : "neutral"}`}>{VERDICT_LABEL[v]}</span> : <span className="muted">–</span>;
-};
+function GuardBadge({ p }: { p: Purchase }) {
+  const o = p.decision.outcome;
+  if (o === "allow") return <span className="badge ok"><Icon name="shield" size={13} />Guard allowed</span>;
+  if (o === "block") return <span className="badge danger"><Icon name="hand" size={13} />Blocked ×{p.decision.violations.length}</span>;
+  return <span className="badge warn"><Icon name="clock" size={13} />Asked you</span>;
+}
 
-function PurchasesGrid({ purchases, onSelect }: { purchases: Purchase[]; onSelect: (id: string) => void }) {
-  const cols = useMemo<ColDef<Purchase>[]>(() => [
-    { headerName: "Time", field: "createdAt", valueFormatter: (p) => when(p.value), width: 130 },
-    { headerName: "Item", field: "title", flex: 2, minWidth: 200 },
-    { headerName: "Agent", field: "mode", width: 95, valueFormatter: (p) => (p.value === "naive" ? "naive*" : "careful") },
-    { headerName: "Qty", valueGetter: (p) => p.data?.order.quantity, width: 70 },
-    { headerName: "Total", field: "total", valueFormatter: (p) => money(p.value), width: 100 },
-    { headerName: "Guard", cellRenderer: GuardCell, width: 120 },
-    { headerName: "PayPal order", valueGetter: (p) => p.data?.paypal?.orderId ?? "–", width: 170, cellClass: "mono" },
-    { headerName: "Verdict", cellRenderer: VerdictCell, width: 150 },
-    {
-      headerName: "Settlement", flex: 1, minWidth: 140,
-      valueGetter: (p) => {
-        const r = p.data?.dispute?.resolution;
-        return !r ? "–" : r.type === "refund" ? `Refund ${money(r.amount)}` : r.type === "payout" ? `Cover pool ${money(r.amount)}` : r.type === "mandate_fix" ? "Rule fix proposed" : r.type;
-      },
-    },
-    { headerName: "Status", cellRenderer: StatusCell, width: 140 },
-  ], []);
-
+function EvidenceList({ purchases, onOpen }: { purchases: Purchase[]; onOpen: (id: string) => void }) {
+  if (!purchases.length) return <div className="card empty"><p className="subhead muted">No agent purchases yet. They appear here the moment the agent tries to buy.</p></div>;
   return (
-    <div className="grid-wrap">
-      <AgGridReact<Purchase>
-        theme={gridTheme}
-        rowData={purchases}
-        columnDefs={cols}
-        getRowId={(p) => p.data.id}
-        rowSelection={{ mode: "singleRow", checkboxes: false, enableClickSelection: true }}
-        onRowClicked={(e) => e.data && onSelect(e.data.id)}
-        defaultColDef={{ sortable: true, resizable: true, filter: true }}
-        overlayNoRowsTemplate="No agent purchases yet"
-      />
+    <div className="stack">
+      {purchases.map((p) => {
+        const v = p.dispute?.result.verdict;
+        return (
+          <button key={p.id} className={`card feed-item s-${p.status} rise`} onClick={() => onOpen(p.id)}>
+            <div className="row between"><StatusBadge status={p.status} /><span className="caption muted">{when(p.createdAt)}</span></div>
+            <div className="row between feed-title"><span className="grow ellipsis">{p.title}</span><span className="num">{money(p.total)}</span></div>
+            <div className="chips">
+              <GuardBadge p={p} />
+              {v && <span className={`badge ${verdictTone(v)}`}>{VERDICT_LABEL[v]}</span>}
+              <span className="badge neutral">{p.mode === "naive" ? "naive* agent" : "careful agent"}</span>
+            </div>
+            {p.paypal && <p className="mono muted">PayPal {p.paypal.orderId}</p>}
+            <Icon name="chevronRight" size={16} className="feed-chevron" />
+          </button>
+        );
+      })}
     </div>
   );
 }
 
-/* ------------------------------------ Evidence comparison ------------------------------------ */
+/* ------------------------------------ Evidence sheet ------------------------------------ */
 
-interface EvidenceRow { field: string; mandate: string; claim: string; snapshot: string; delivered: string; bad: Set<string> }
+interface EvidenceRow { field: string; cells: [string, string, string, string]; bad: Set<number> }
+const SOURCES = ["Signed mandate", "Agent claimed", "Page snapshot", "Delivered (photo)"];
 
 function mandateOf(state: AppState, id: string): Mandate | undefined {
   return [...state.mandates, ...state.retiredMandates].find((m) => m.mandate.id === id)?.mandate;
@@ -163,119 +148,134 @@ function evidenceRows(p: Purchase, m?: Mandate): EvidenceRow[] {
   const keys = new Set([...Object.keys(m?.required ?? {}), ...Object.keys(m?.allowed ?? {}), ...Object.keys(p.order.attributes), ...Object.keys(p.snapshot.attributes), ...Object.keys(delivered)]);
   const rows: EvidenceRow[] = [...keys].map((k) => ({
     field: prettyKey(k),
-    mandate: m?.required[k] ?? (m?.allowed[k] ? m.allowed[k].join(" / ") : "any"),
-    claim: p.order.attributes[k] ?? "–",
-    snapshot: p.snapshot.attributes[k] ?? "–",
-    delivered: p.dispute ? delivered[k] ?? "not visible" : "–",
-    bad: new Set<string>(),
+    cells: [
+      m?.required[k] ?? (m?.allowed[k] ? m.allowed[k].join(" / ") : "any"),
+      p.order.attributes[k] ?? "–",
+      p.snapshot.attributes[k] ?? "–",
+      p.dispute ? delivered[k] ?? "not visible" : "–",
+    ],
+    bad: new Set<number>(),
   }));
-  rows.push({ field: "unit price", mandate: `≤ ${money(m?.maxUnitPrice)}`, claim: money(p.order.unitPrice), snapshot: money(p.snapshot.unitPrice), delivered: "–", bad: new Set() });
-  rows.push({ field: "quantity", mandate: `≤ ${m?.maxQuantity ?? "–"}`, claim: String(p.order.quantity), snapshot: "–", delivered: "–", bad: new Set() });
-
-  const mark = (field: string, col: string) => rows.find((r) => r.field === prettyKey(field) || r.field === field)?.bad.add(col);
+  rows.push({ field: "unit price", cells: [`≤ ${money(m?.maxUnitPrice)}`, money(p.order.unitPrice), money(p.snapshot.unitPrice), "–"], bad: new Set() });
+  rows.push({ field: "quantity", cells: [`≤ ${m?.maxQuantity ?? "–"}`, String(p.order.quantity), "–", "–"], bad: new Set() });
+  const mark = (field: string, col: number) => rows.find((r) => r.field === prettyKey(field) || r.field === field)?.bad.add(col);
   for (const f of p.dispute?.result.findings ?? []) {
-    if (f.compared === "mandate_vs_claim") mark(f.field, "claim");
-    if (f.compared === "snapshot_vs_claim") { mark(f.field, "claim"); mark(f.field, "snapshot"); }
-    if (f.compared === "delivered_vs_snapshot") mark(f.field, "delivered");
+    if (f.compared === "mandate_vs_claim") mark(f.field, 1);
+    if (f.compared === "snapshot_vs_claim") { mark(f.field, 1); mark(f.field, 2); }
+    if (f.compared === "delivered_vs_snapshot") mark(f.field, 3);
   }
   for (const v of p.decision.violations) {
-    if (v.rule === "price_over_limit") mark("unit price", "claim");
-    if (v.rule === "quantity_over_limit") mark("quantity", "claim");
+    if (v.rule === "price_over_limit") mark("unit price", 1);
+    if (v.rule === "quantity_over_limit") mark("quantity", 1);
     const field = v.detail.match(/^(\w+) must/)?.[1];
-    if (field && (v.rule === "required_attribute" || v.rule === "attribute_not_allowed")) mark(field, "claim");
+    if (field && (v.rule === "required_attribute" || v.rule === "attribute_not_allowed")) mark(field, 1);
   }
   return rows;
 }
 
-function PurchaseEvidence({ p, state, entries }: { p: Purchase; state: AppState; entries: LedgerEntry[] }) {
-  const m = mandateOf(state, p.mandateId);
-  const rows = evidenceRows(p, m);
-  const bad = (col: string) => ({ "cell-bad": (x: { data?: EvidenceRow }) => !!x.data?.bad.has(col) });
-  const cols: ColDef<EvidenceRow>[] = [
-    { headerName: "Field", field: "field", width: 130, cellStyle: { fontWeight: 600 } },
-    { headerName: "① Signed mandate", field: "mandate", flex: 1 },
-    { headerName: "② Agent claimed", field: "claim", flex: 1, cellClassRules: bad("claim") },
-    { headerName: "③ Page snapshot", field: "snapshot", flex: 1, cellClassRules: bad("snapshot") },
-    { headerName: "④ Delivered (photo)", field: "delivered", flex: 1, cellClassRules: bad("delivered") },
-  ];
-  const timeline = entries.filter((e) => e.purchaseId === p.id || e.purchaseId === p.mandateId);
+export function EvidenceSheet({ state, id }: { state: AppState; id: string }) {
+  const { ledger } = useLedger();
+  const p = state.purchases.find((x) => x.id === id);
+  if (!p) return <p className="subhead muted">This purchase isn't in the record.</p>;
+  const rows = evidenceRows(p, mandateOf(state, p.mandateId));
+  const timeline = (ledger?.entries ?? []).filter((e) => e.purchaseId === p.id || e.purchaseId === p.mandateId);
+  const broken = ledger?.verify.brokenAt;
+  const [visible, hidden] = p.snapshot.listingText.split("\n[hidden] ");
 
   return (
-    <div className="detail">
-      <div className="stack">
-        <div className="card stack-sm">
-          <div className="row between"><strong>Evidence comparison: {p.title}</strong><span className="xs muted">{p.id}</span></div>
-          <p className="xs muted">Red cells are where the record disagrees. The arbiter's rules decide fault from these cells alone.</p>
-          <div style={{ height: 60 + rows.length * 42 }}>
-            <AgGridReact<EvidenceRow> theme={gridTheme} rowData={rows} columnDefs={cols} domLayout="normal" suppressCellFocus />
-          </div>
-        </div>
-        <div className="card stack-sm">
-          <strong>What the agent saw</strong>
-          <p className="small">{p.snapshot.listingText.split("\n[hidden] ")[0]}</p>
-          {p.snapshot.listingText.includes("[hidden]") && <p className="hidden-text revealed">Hidden text on page: {p.snapshot.listingText.split("[hidden] ")[1]}</p>}
-          <p className="xs muted">Agent's reasoning: {p.order.reasoning}</p>
-        </div>
-      </div>
-      <div className="stack">
-        {p.dispute ? <div className="card"><VerdictCard p={p} /></div> : (
-          <div className="card stack-sm">
-            <strong>Guard decision: {p.decision.outcome}</strong>
-            {p.decision.violations.map((v, i) => <p key={i} className="small">✋ {v.detail}</p>)}
-            {p.why && <p className="small muted">{p.why}</p>}
-          </div>
-        )}
-        <div className="card stack-sm">
-          <strong>Flight record ({timeline.length} sealed entries)</strong>
-          {timeline.map((e) => (
-            <div key={e.seq} className="row between xs">
-              <span>#{e.seq} {e.kind.replace(/_/g, " ")}</span>
-              <span className="mono muted">{e.hash.slice(0, 10)}…</span>
+    <div className="stack">
+      <div className="row between"><StatusBadge status={p.status} /><span className="mono muted">{p.id}</span></div>
+      <h2 className="title-2">{p.title}</h2>
+
+      <section className="stack-sm">
+        <h3 className="section-title">Evidence, four ways</h3>
+        <p className="footnote muted">Red cells are where the record disagrees. The arbiter's rules decide fault from these cells alone.</p>
+        {rows.map((r) => (
+          <div key={r.field} className="ev-row">
+            <span className="ev-field">{r.field}</span>
+            <div className="ev-cells">
+              {r.cells.map((c, i) => (
+                <div key={i} className={`ev-cell ${r.bad.has(i) ? "bad" : ""}`}>
+                  <span className="caption">{i + 1} · {SOURCES[i]}</span>
+                  <span className="ev-val">{r.bad.has(i) && <Icon name="alert" size={13} />}{c}</span>
+                </div>
+              ))}
             </div>
+          </div>
+        ))}
+      </section>
+
+      <section className="card stack-sm">
+        <h3 className="headline">What the agent saw</h3>
+        <p className="subhead">{visible}</p>
+        {hidden && <p className="hidden-text revealed">Hidden text on page: {hidden}</p>}
+        <p className="footnote muted">Agent's reasoning: {p.order.reasoning}</p>
+      </section>
+
+      {p.dispute ? <VerdictCard p={p} /> : (
+        <section className={`card callout ${p.decision.outcome === "block" ? "danger" : p.decision.outcome === "allow" ? "ok" : "warn"}`}>
+          <strong className="headline">Guard decision: {p.decision.outcome === "allow" ? "allowed" : p.decision.outcome === "block" ? "blocked" : "asked you"}</strong>
+          {p.decision.violations.map((v, i) => <p key={i} className="subhead row" style={{ alignItems: "flex-start" }}><Icon name="hand" size={16} />{v.detail}</p>)}
+          {p.why && <p className="footnote muted">{p.why}</p>}
+        </section>
+      )}
+
+      <section className="stack-sm">
+        <h3 className="section-title">Flight record · {timeline.length} sealed entries</h3>
+        <ol className="chain">
+          {timeline.map((e) => (
+            <li key={e.seq} className={broken !== undefined && e.seq >= broken ? "broken" : ""}>
+              <span className="chain-node" />
+              <span className="grow">#{e.seq} {e.kind.replace(/_/g, " ")}</span>
+              <span className="mono muted">{e.hash.slice(0, 10)}…</span>
+            </li>
           ))}
-        </div>
-      </div>
+        </ol>
+      </section>
+      {p.paypal && <p className="mono muted">PayPal order {p.paypal.orderId}{p.paypal.captureId ? ` · capture ${p.paypal.captureId}` : ""}</p>}
     </div>
   );
 }
 
 /* ------------------------------------ Flight recorder ------------------------------------ */
 
-function LedgerView({ ledger, onTamper, onVerify }: { ledger: { entries: LedgerEntry[]; verify: VerifyResult }; onTamper: (seq: number) => void; onVerify: () => void }) {
+function Recorder({ ledger, onVerify, onTamper }: { ledger: Ledger; onVerify: () => void; onTamper: (seq: number) => void }) {
   const [sel, setSel] = useState<number | null>(null);
   const broken = ledger.verify.brokenAt;
-  const cols: ColDef<LedgerEntry>[] = [
-    { headerName: "#", field: "seq", width: 70 },
-    { headerName: "Time", field: "ts", valueFormatter: (p) => when(p.value), width: 140 },
-    { headerName: "Record", field: "purchaseId", width: 130, cellClass: "mono" },
-    { headerName: "Entry", field: "kind", width: 170, valueFormatter: (p) => String(p.value).replace(/_/g, " ") },
-    { headerName: "Payload", valueGetter: (p) => JSON.stringify(p.data?.payload).slice(0, 140), flex: 2, cellClass: "mono" },
-    { headerName: "Prev hash", field: "prevHash", width: 130, cellClass: "mono", valueFormatter: (p) => `${String(p.value).slice(0, 10)}…` },
-    { headerName: "Hash", field: "hash", width: 130, cellClass: "mono", valueFormatter: (p) => `${String(p.value).slice(0, 10)}…` },
-    {
-      headerName: "Chain", width: 110,
-      valueGetter: (p) => (broken !== undefined && p.data!.seq >= broken ? "✗ broken" : "✓ ok"),
-      cellClassRules: { "hash-broken": (p) => broken !== undefined && p.data!.seq >= broken, "cell-good": (p) => broken === undefined || p.data!.seq < broken },
-    },
-  ];
+  const entries = [...ledger.entries].reverse();
   return (
     <div className="stack">
-      <div className="row wrap">
-        <button className="btn primary" onClick={onVerify}>Verify chain</button>
-        <button className="btn danger" disabled={sel === null} onClick={() => sel !== null && onTamper(sel)}>Tamper with selected entry (demo)</button>
-        <span className="small muted">Each entry's hash covers its content and the previous hash. Edit anything and the chain breaks from that point on.</span>
+      {broken !== undefined && (
+        <div className="card callout danger"><strong className="headline row"><Icon name="alert" size={18} />Tampering detected at entry #{broken}</strong>
+          <p className="footnote">Every entry after it no longer matches its hash.</p></div>
+      )}
+      <div className="row" style={{ gap: 10 }}>
+        <button className="btn primary grow" onClick={onVerify}><Icon name="lock" size={16} />Verify chain</button>
+        <button className="btn danger grow" disabled={sel === null} onClick={() => sel !== null && onTamper(sel)}>Tamper (demo)</button>
       </div>
-      <div style={{ height: 460 }}>
-        <AgGridReact<LedgerEntry>
-          theme={gridTheme}
-          rowData={[...ledger.entries].reverse()}
-          columnDefs={cols}
-          getRowId={(p) => String(p.data.seq)}
-          rowSelection={{ mode: "singleRow", checkboxes: false, enableClickSelection: true }}
-          onRowClicked={(e) => e.data && setSel(e.data.seq)}
-          defaultColDef={{ resizable: true, sortable: true, filter: true }}
-        />
-      </div>
+      <p className="footnote muted">Each entry's hash covers its content and the previous hash. Tap an entry, then tamper with it to watch the chain break.</p>
+      {entries.length === 0 ? <div className="card empty"><p className="subhead muted">The record is empty.</p></div> : (
+        <ol className="chain card">
+          {entries.map((e) => {
+            const bad = broken !== undefined && e.seq >= broken;
+            return (
+              <li key={e.seq} className={`${bad ? "broken" : ""} ${sel === e.seq ? "sel" : ""}`}>
+                <button className="chain-btn" onClick={() => setSel(sel === e.seq ? null : e.seq)} aria-pressed={sel === e.seq}>
+                  <span className="chain-node" />
+                  <span className="grow stack-xs">
+                    <span className="subhead">#{e.seq} {e.kind.replace(/_/g, " ")}</span>
+                    <span className="caption muted">{when(e.ts)} · {e.purchaseId}</span>
+                  </span>
+                  <span className="stack-xs" style={{ alignItems: "flex-end" }}>
+                    <span className="mono muted">{e.hash.slice(0, 8)}…</span>
+                    <span className={`caption ${bad ? "danger-text" : "ok-text"}`}>{bad ? "broken" : "ok"}</span>
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      )}
     </div>
   );
 }
@@ -284,19 +284,20 @@ function LedgerView({ ledger, onTamper, onVerify }: { ledger: { entries: LedgerE
 
 function MerchantView({ purchases }: { purchases: Purchase[] }) {
   const claims = purchases.filter((p) => p.dispute);
-  if (!claims.length) return <p className="small muted">No claims against Stride Supply yet.</p>;
   return (
     <div className="stack">
-      <p className="small muted">Stride Supply sees the same sealed evidence and verdict as the buyer. Fair to both sides.</p>
+      <p className="footnote muted">{STORE_NAME} sees the same sealed evidence and verdict as the buyer. Fair to both sides.</p>
+      {!claims.length && <div className="card empty"><Icon name="store" size={22} /><p className="subhead muted">No claims against {STORE_NAME} yet.</p></div>}
       {claims.map((p) => {
         const d = p.dispute!;
         return (
-          <div key={p.id} className="card stack-sm">
-            <div className="row between"><strong>{p.title}</strong><span className="badge neutral">{when(p.createdAt)}</span></div>
-            <p className="small">Buyer's photo shows: {Object.entries(d.delivered.attributes).map(([k, v]) => `${prettyKey(k)} ${v}`).join(", ") || "unreadable"}</p>
-            <p className="small">Our warehouse shipped: {Object.entries(d.merchant.evidence.shippedAttributes).map(([k, v]) => `${prettyKey(k)} ${v}`).join(", ")}</p>
-            <div className="quote">Our agent ({d.merchant.stance}): {d.merchant.message}</div>
-            <div className="row wrap"><span className="badge info">{VERDICT_LABEL[d.result.verdict]}</span><span className="small muted">{d.resolution?.detail}</span></div>
+          <div key={p.id} className="card stack-sm rise">
+            <div className="row between"><strong className="headline">{p.title}</strong><span className="caption muted">{when(p.createdAt)}</span></div>
+            <p className="subhead">Buyer's photo shows: {Object.entries(d.delivered.attributes).map(([k, v]) => `${prettyKey(k)} ${v}`).join(", ") || "unreadable"}</p>
+            <p className="subhead">Our warehouse shipped: {Object.entries(d.merchant.evidence.shippedAttributes).map(([k, v]) => `${prettyKey(k)} ${v}`).join(", ")}</p>
+            <div className="quote"><p className="subhead">Our agent ({d.merchant.stance}): {d.merchant.message}</p></div>
+            <div className="chips"><span className={`badge ${verdictTone(d.result.verdict)}`}>{VERDICT_LABEL[d.result.verdict]}</span></div>
+            {d.resolution && <p className="footnote muted">{d.resolution.detail}</p>}
           </div>
         );
       })}

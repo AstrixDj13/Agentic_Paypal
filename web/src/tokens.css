@@ -1,85 +1,158 @@
 /*
- * DESIGN TOKENS — the only file to change when Anubhav's design system lands.
- * Every colour, font, radius, spacing and shadow in the app reads from these variables.
+ * DESIGN TOKENS: Soft Glass v0.1, Option A "PayPal Native".
+ * Every colour, font, radius, spacing, shadow and glass material in the app reads from these variables.
+ * Light leads; dark follows the system setting, or is forced with <html data-theme="dark|light">.
  */
 :root {
-  /* Brand */
-  --brand-navy: #0b1f3a;
-  --brand-blue: #1f6feb;
-  --brand-blue-soft: #e8f0fe;
-  --brand-gold: #ffc439;
+  color-scheme: light;
+
+  /* Brand (PayPal) */
+  --brand-navy: #003087;      /* headings, hero gradients */
+  --brand-deep: #012169;      /* deepest navy, gradient end */
+  --brand-blue: #0070e0;      /* primary actions, links, focus (4.8:1 on white) */
+  --brand-blue-soft: #e6f0fd; /* selected, info chips */
+  --brand-sky: #009cde;       /* fills and glows only on light (3.1:1), never text */
+  --brand-gold: #ffc439;      /* Connect PayPal button only */
+  --on-gold: #003087;
+
+  /* Chrome: the PayPal brand bar at the top of the app (dark in both themes) */
+  --chrome: #1f1f1f;
+  --chrome-text: #ffffff;
+  --chrome-muted: rgba(255, 255, 255, 0.72);
 
   /* Surfaces & text */
-  --bg: #f4f6fb;
+  --bg: #f3f5f9;
   --surface: #ffffff;
-  --surface-2: #f8f9fc;
-  --text: #0f172a;
+  --surface-2: #f7f8fb;
+  --text: #0b1324;
   --text-muted: #5b6475;
-  --border: #e3e7ef;
+  --border: #e4e8f0;
 
-  /* Status */
-  --ok: #0f8a5f;
-  --ok-soft: #e3f6ee;
-  --warn: #a15c00;
-  --warn-soft: #fff3dc;
+  /* Status: always paired with an icon and a word, never colour alone */
+  --ok: #0e7c4a;
+  --ok-soft: #e2f5ec;
+  --warn: #b45309;
+  --warn-soft: #fff1db;
   --danger: #c2291d;
-  --danger-soft: #fde8e6;
-  --info: #3d4fd1;
-  --info-soft: #ebedfd;
+  --danger-soft: #fde7e4;
+  --info: #6d28d9;            /* "agent at fault" / Cover Pool */
+  --info-soft: #efe8fd;
+  --switch-on: #34c759;
 
-  /* Type */
-  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", Consolas, ui-monospace, monospace;
-  --text-xs: 12px;
-  --text-sm: 13px;
-  --text-md: 15px;
-  --text-lg: 18px;
-  --text-xl: 24px;
-  --text-2xl: 32px;
+  /* Liquid Glass materials (controls layer only) */
+  --glass-fill: linear-gradient(145deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.5));
+  --glass-thick: rgba(255, 255, 255, 0.9);
+  --glass-edge: rgba(255, 255, 255, 0.9);
+  --glass-highlight: inset 0 1.5px 0 rgba(255, 255, 255, 1);
+  --glass-blur: blur(24px) saturate(180%);
+  --glow-1: rgba(0, 112, 224, 0.16);
+  --glow-2: rgba(255, 196, 57, 0.12);
 
-  /* Shape & space */
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 18px;
+  /* Type: SF Pro on Apple, Inter elsewhere. Sizes follow Apple Dynamic Type defaults. */
+  --font-sans: "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+  --text-xs: 12px;     /* caption */
+  --text-sm: 13px;     /* footnote */
+  --text-md: 15px;     /* subhead */
+  --text-body: 17px;   /* body / headline */
+  --text-lg: 20px;     /* title 3 */
+  --text-xl: 22px;     /* title 2 */
+  --text-2xl: 34px;    /* large title */
+  --text-display: 48px;/* balance */
+
+  /* Shape: concentric radii (inner = outer - padding) */
+  --radius-sm: 10px;
+  --radius-md: 14px;   /* controls */
+  --radius-lg: 20px;   /* inner cards */
+  --radius-xl: 28px;   /* cards */
+  --radius-sheet: 32px;
   --radius-pill: 999px;
+
+  /* Space: 4pt base, 8pt rhythm */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
-  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
-  --shadow-md: 0 6px 20px rgba(15, 23, 42, 0.08);
-  --shadow-phone: 0 30px 80px rgba(11, 31, 58, 0.25);
+  --space-5: 20px;
+  --space-6: 28px;
+  --space-7: 40px;
+  --gutter: 20px;
+  --tap: 44px;
+
+  /* Elevation */
+  --shadow-sm: 0 1px 2px rgba(11, 19, 36, 0.04), 0 4px 14px rgba(11, 19, 36, 0.05);
+  --shadow-md: 0 1px 2px rgba(11, 19, 36, 0.04), 0 8px 24px rgba(11, 19, 36, 0.07);
+  --shadow-glass: 0 12px 40px rgba(0, 48, 135, 0.14), 0 2px 6px rgba(0, 48, 135, 0.06);
+  --shadow-sheet: 0 -10px 40px rgba(11, 19, 36, 0.16);
+  --shadow-blue: 0 14px 30px rgba(0, 48, 135, 0.3);
+  --shadow-phone: 0 40px 90px rgba(0, 30, 90, 0.28);
+  --scrim: rgba(8, 14, 28, 0.38);
 }
 
+/* Dark values, shared by the system preference and the manual override. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0b1220;
-    --surface: #121a2b;
-    --surface-2: #172138;
-    --text: #e7ecf5;
-    --text-muted: #9aa6bd;
-    --border: #243049;
-    --brand-blue-soft: #16264a;
-    --ok-soft: #0f2e25;
+    color-scheme: dark;
+    --brand-navy: #0a2a6e;
+    --brand-blue: #4da3ff;
+    --brand-blue-soft: #122544;
+    --chrome: #111318;
+    --bg: #0b0f17;
+    --surface: #141a26;
+    --surface-2: #1b2333;
+    --text: #eef2f8;
+    --text-muted: #a5afc2;
+    --border: #232c3d;
+    --ok: #34c759;
+    --ok-soft: #0f2e22;
+    --warn: #ffb340;
     --warn-soft: #33260c;
+    --danger: #ff6b5e;
     --danger-soft: #3a1714;
-    --info-soft: #1b2150;
-    --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.35);
+    --info: #b79cff;
+    --info-soft: #231a45;
+    --glass-fill: linear-gradient(145deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.05));
+    --glass-thick: rgba(24, 30, 44, 0.94);
+    --glass-edge: rgba(255, 255, 255, 0.14);
+    --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+    --glow-1: rgba(22, 52, 110, 0.75);
+    --glow-2: rgba(0, 156, 222, 0.08);
+    --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 6px 18px rgba(0, 0, 0, 0.35);
+    --shadow-md: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 10px 30px rgba(0, 0, 0, 0.4);
+    --shadow-glass: 0 16px 40px rgba(0, 0, 0, 0.45);
+    --shadow-blue: 0 14px 30px rgba(0, 0, 0, 0.45);
+    --scrim: rgba(0, 0, 0, 0.55);
   }
 }
 :root[data-theme="dark"] {
-  --bg: #0b1220;
-  --surface: #121a2b;
-  --surface-2: #172138;
-  --text: #e7ecf5;
-  --text-muted: #9aa6bd;
-  --border: #243049;
-  --brand-blue-soft: #16264a;
-  --ok-soft: #0f2e25;
+  color-scheme: dark;
+  --brand-navy: #0a2a6e;
+  --brand-blue: #4da3ff;
+  --brand-blue-soft: #122544;
+  --chrome: #111318;
+  --bg: #0b0f17;
+  --surface: #141a26;
+  --surface-2: #1b2333;
+  --text: #eef2f8;
+  --text-muted: #a5afc2;
+  --border: #232c3d;
+  --ok: #34c759;
+  --ok-soft: #0f2e22;
+  --warn: #ffb340;
   --warn-soft: #33260c;
+  --danger: #ff6b5e;
   --danger-soft: #3a1714;
-  --info-soft: #1b2150;
-  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.35);
+  --info: #b79cff;
+  --info-soft: #231a45;
+  --glass-fill: linear-gradient(145deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.05));
+  --glass-thick: rgba(24, 30, 44, 0.94);
+  --glass-edge: rgba(255, 255, 255, 0.14);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  --glow-1: rgba(22, 52, 110, 0.75);
+  --glow-2: rgba(0, 156, 222, 0.08);
+  --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 6px 18px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 10px 30px rgba(0, 0, 0, 0.4);
+  --shadow-glass: 0 16px 40px rgba(0, 0, 0, 0.45);
+  --shadow-blue: 0 14px 30px rgba(0, 0, 0, 0.45);
+  --scrim: rgba(0, 0, 0, 0.55);
 }
