@@ -1,9 +1,9 @@
 {
-  "name": "Agent Pocket",
+  "name": "PayPal Pocket",
   "short_name": "Pocket",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f6f7fb",
-  "theme_color": "#0b1f3a",
+  "background_color": "#f3f5f9",
+  "theme_color": "#1f1f1f",
   "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
 }
