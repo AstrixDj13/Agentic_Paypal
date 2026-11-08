@@ -15,6 +15,17 @@ test("a paused agent cannot buy, even inside its rules", () => {
   assert.deepEqual(rules(d), ["agent_paused"]);
 });
 
+test("a closed agent cannot buy, even inside its rules", () => {
+  const d = checkOrder(signed, claim, { ...pocket, closedAt: NOW.toISOString() }, state, NOW);
+  assert.equal(d.outcome, "block");
+  assert.deepEqual(rules(d), ["agent_closed"]);
+});
+
+test("closing never softens into an ask, even with ask-every-purchase on", () => {
+  const d = checkOrder(signed, claim, { ...pocket, closedAt: NOW.toISOString() }, { ...state, askEveryPurchase: true }, NOW);
+  assert.equal(d.outcome, "block");
+});
+
 test('"ask me about anything" turns every in-rules purchase into a one-tap ask', () => {
   const d = checkOrder(signed, claim, pocket, { ...state, askEveryPurchase: true }, NOW);
   assert.equal(d.outcome, "ask_user");

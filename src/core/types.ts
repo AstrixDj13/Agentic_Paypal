@@ -50,6 +50,8 @@ export interface Pocket {
   askMode?: AskMode;
   /** Per-agent kill switch. */
   paused?: boolean;
+  /** Closed agents never buy again. Their purchases and records stay. Restoring needs the user's PIN. */
+  closedAt?: string;
   /** Chat messages after this time count as unread. */
   lastReadAt?: string;
   createdAt?: string;
