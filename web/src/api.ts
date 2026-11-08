@@ -10,6 +10,8 @@ export type AskMode = "anything" | "money";
 export interface Pocket {
   id: string; name: string; balance: number; currency: "USD";
   color?: string; askMode?: AskMode; paused?: boolean; lastReadAt?: string; createdAt?: string;
+  /** Closed agents never buy again; their records stay. */
+  closedAt?: string;
 }
 
 export interface DiffRow { label: string; from: string; to: string }
@@ -129,12 +131,17 @@ export function useAppState(intervalMs = 2000) {
   return { state, error, refresh };
 }
 
+export interface Toast { text: string; error?: boolean; action?: { label: string; run: () => void } }
+
 /** Tiny toast helper shared by pages. */
 export function useToast() {
-  const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(null);
-  const show = useCallback((text: string, error = false) => {
-    setToast({ text, error });
-    setTimeout(() => setToast(null), 3500);
+  const [toast, setToast] = useState<Toast | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const show = useCallback((text: string, error = false, action?: Toast["action"]) => {
+    clearTimeout(timer.current);
+    setToast({ text, error, action });
+    // Longer when there's an Undo, so there's time to reach it.
+    timer.current = setTimeout(() => setToast(null), action ? 6000 : 3500);
   }, []);
   return { toast, show };
 }
@@ -148,8 +155,8 @@ export const attrsText = (a: Attributes) => Object.entries(a).map(([k, v]) => `$
 
 export const STATUS_LABEL: Record<Purchase["status"], { text: string; tone: string }> = {
   completed: { text: "Bought", tone: "ok" },
-  blocked: { text: "Blocked by guard", tone: "danger" },
-  needs_approval: { text: "Needs your OK", tone: "warn" },
+  blocked: { text: "Stopped", tone: "danger" },
+  needs_approval: { text: "Needs approval", tone: "warn" },
   failed: { text: "Payment failed", tone: "danger" },
   disputed: { text: "Under review", tone: "warn" },
   resolved: { text: "Settled", tone: "ok" },
@@ -159,7 +166,7 @@ export const STATUS_LABEL: Record<Purchase["status"], { text: string; tone: stri
 export const VERDICT_LABEL: Record<Verdict, string> = {
   MERCHANT_AT_FAULT: "Merchant at fault",
   AGENT_AT_FAULT: "Agent at fault",
-  INSTRUCTION_UNCLEAR: "Instruction unclear",
+  INSTRUCTION_UNCLEAR: "Rule was unclear",
   NEEDS_REVIEW: "Needs a clearer photo",
 };
 

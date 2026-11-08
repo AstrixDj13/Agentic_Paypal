@@ -10,6 +10,7 @@ import type { GuardState, Pocket, ProposedOrder, SignedMandate } from "./types.t
 export type GuardRule =
   | "kill_switch"
   | "agent_paused"
+  | "agent_closed"
   | "ask_every_purchase"
   | "signature"
   | "mandate_mismatch"
@@ -49,6 +50,7 @@ export function checkOrder(
   const total = round2(order.unitPrice * order.quantity);
 
   if (state.killSwitch) v.push({ rule: "kill_switch", detail: "Kill switch is on; all agent spending is paused." });
+  if (pocket.closedAt) v.push({ rule: "agent_closed", detail: `${pocket.name} is closed; it cannot buy.` });
   if (pocket.paused) v.push({ rule: "agent_paused", detail: `${pocket.name} is paused; it cannot buy until you resume it.` });
   if (!verifyMandate(signed)) v.push({ rule: "signature", detail: "Mandate signature is invalid or the mandate was altered." });
   if (order.mandateId !== m.id) v.push({ rule: "mandate_mismatch", detail: `Order cites mandate ${order.mandateId}, expected ${m.id}.` });

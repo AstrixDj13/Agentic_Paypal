@@ -200,7 +200,7 @@ async function reasonLine(m: Mandate, o: ProposedOrder, mode: AgentMode): Promis
 export async function whyLine(m: Mandate, o: ProposedOrder): Promise<string> {
   const fallback = `Bought because ${o.title} matched your rules: ${Object.entries(m.required).map(([k, v]) => `${k.replace("_", " ")} ${v}`).join(", ") || "item"}, $${o.unitPrice} under your $${m.maxUnitPrice} limit, from an approved store.`;
   const ai = await askText(
-    'Write one friendly sentence (max 25 words) starting with "Bought because" that explains this purchase to the user, citing their rules.',
+    'Write one plain, factual sentence (max 25 words) starting with "Bought because" that explains this purchase to the user, citing their rules. No emojis or exclamation marks.',
     JSON.stringify({ rules: { item: m.item, required: m.required, allowed: m.allowed, maxUnitPrice: m.maxUnitPrice }, order: o }),
   );
   return ai ?? fallback;

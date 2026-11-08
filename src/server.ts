@@ -53,6 +53,10 @@ app.post("/api/agents/:id/read", route((req) => agentsSvc.markRead(req.params.id
 app.post("/api/agents/:id/check", route((req) => agentsSvc.checkNow(req.params.id, baseUrl(req))));
 app.post("/api/agents/:id/find", route((req) => agentsSvc.findReal(req.params.id, baseUrl(req))));
 app.post("/api/agents/:id/end-exception", route((req) => agentsSvc.endExceptionNow(req.params.id)));
+// Closing only stops spending, so no PIN. Restoring lets it spend again, so it needs a signature.
+app.post("/api/agents/:id/close", route((req) => agentsSvc.closeAgent(req.params.id)));
+app.post("/api/agents/:id/restore", signed((req) => agentsSvc.restoreAgent(req.params.id)));
+app.post("/api/agents/:id/delete", route((req) => agentsSvc.deleteAgent(req.params.id)));
 app.post("/api/agents/:id/transfer", signed((req) => agentsSvc.transfer(String(req.body.fromId ?? ""), req.params.id, Number(req.body.amount))));
 app.post("/api/proposals/:id/approve", signed((req) => agentsSvc.approveProposal(req.params.id, baseUrl(req))));
 app.post("/api/proposals/:id/decline", route((req) => agentsSvc.declineProposal(req.params.id)));

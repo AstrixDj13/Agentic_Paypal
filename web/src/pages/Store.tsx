@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import { api, money, useAppState, useToast, type Product } from "../api";
 import { Toast } from "../components/ui";
 
-const EMOJI: Record<string, string> = { pegasus: "👟", ultraboost: "👟", cloudrunner: "⚡" };
 
 /**
  * Stride Supply: the demo merchant. Deliberately plain and not PayPal-branded,
@@ -19,7 +18,7 @@ export default function Store() {
 
   if (!state) return <div className="store"><p className="store-pad">Loading…</p></div>;
   // Which agent the demo buttons send. Defaults to the first agent that has a job.
-  const withJobs = state.pockets.filter((p) => state.mandates.some((m) => m.mandate.pocketId === p.id));
+  const withJobs = state.pockets.filter((p) => !p.closedAt && state.mandates.some((m) => m.mandate.pocketId === p.id));
   const agent = withJobs.find((p) => p.id === agentId) ?? withJobs[0];
   const mandate = agent ? state.mandates.find((m) => m.mandate.pocketId === agent.id)?.mandate : undefined;
 
@@ -47,14 +46,14 @@ export default function Store() {
           <h1>Stride Supply</h1>
           <p>Running gear · Agent-ready checkout with PayPal</p>
         </div>
-        <span className="store-badge">✓ Accepts AI agent checkout</span>
+        <span className="store-badge">Accepts agent checkout</span>
       </header>
 
       <div className="store-pad">
         <section className="backstage">
           <div className="backstage-head">
             <strong>Demo controls</strong>
-            <span className="backstage-links"><Link to="/">Pocket app ↗</Link><Link to="/console">Black Box ↗</Link></span>
+            <span className="backstage-links"><Link to="/">Pocket app</Link><Link to="/console">Black Box</Link></span>
           </div>
           <p>
             {mandate ? <>Sending <strong>{agent!.name}</strong>, whose job is “{mandate.instruction}”.</> : "Create an agent with a job in the Pocket app first."}{" "}
@@ -64,7 +63,7 @@ export default function Store() {
             <div className="import-row" role="radiogroup" aria-label="Agent to send">
               {withJobs.map((p) => (
                 <button key={p.id} role="radio" aria-checked={agent?.id === p.id} className={`s-btn ${agent?.id === p.id ? "dark" : ""}`} onClick={() => setAgentId(p.id)}>
-                  <span style={{ width: 12, height: 12, borderRadius: 6, background: p.color, display: "inline-block" }} />{p.name}
+                  {p.name}
                 </button>
               ))}
             </div>
@@ -90,8 +89,8 @@ export default function Store() {
         <div className="products">
           {state.products.map((p) => (
             <article key={p.id} className="product">
-              <div className={`product-img ${p.image}`}>{p.imageUrl ? <img src={p.imageUrl} alt={p.title} loading="lazy" /> : EMOJI[p.image] ?? "👟"}</div>
-              {p.source && <a className="real-tag" href={p.source.url} target="_blank" rel="noreferrer">Real listing · {p.source.domain} ↗</a>}
+              <div className={`product-img ${p.image}`}>{p.imageUrl ? <img src={p.imageUrl} alt={p.title} loading="lazy" /> : <span className="product-ph">{p.attributes.brand ?? "Product"}<small>{p.attributes.model ?? p.title}</small></span>}</div>
+              {p.source && <a className="real-tag" href={p.source.url} target="_blank" rel="noreferrer">Real listing · {p.source.domain}</a>}
               <div className="product-row">
                 <h2>{p.title}</h2>
                 <span className={`stock ${p.inStock ? "in" : "out"}`}>{p.inStock ? "In stock" : "Sold out"}</span>
@@ -105,7 +104,7 @@ export default function Store() {
                 </button>
                 {p.id === "pegasus-41" && (
                   <button className="s-btn" disabled={!!busy} onClick={() => act(`${p.id}-wh`, () => api(`/api/store/${p.id}/warehouse-error`, { shipsAs: p.shipsAs ? null : { ...p.attributes, size_us: "11" } }), () => (p.shipsAs ? "Warehouse fixed" : "Warehouse will ship the wrong size (US 11)"))}>
-                    {p.shipsAs ? "✓ Ships wrong size" : "Warehouse error: US 11"}
+                    {p.shipsAs ? "Wrong size is on (tap to fix)" : "Warehouse error: US 11"}
                   </button>
                 )}
               </div>

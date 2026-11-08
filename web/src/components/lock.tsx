@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { api } from "../api";
 import { Mark } from "./Brand";
 import { Icon } from "./Icon";
+import { Money } from "./ui";
 
 /**
  * PIN pad from the design: unlocks the app, and is how you SIGN (rule changes, new agents,
@@ -144,8 +145,8 @@ export function LockScreen({ mode, title, detail, onDone, onCancel }: {
     mode === "setup" ? (first ? "Enter it again" : "Create a 4-digit PIN") :
     mode === "sign" ? (title ?? "Sign with your PIN") : "Enter your PIN";
   const sub =
-    mode === "setup" ? "You'll use it to sign for your agents" :
-    mode === "sign" ? (detail ?? "Nothing changes until you sign") : "PayPal Pocket is locked";
+    mode === "setup" ? "You'll use it to approve what your agents do" :
+    mode === "sign" ? (detail ?? "Nothing changes until you approve") : "PayPal Pocket is locked";
   const deleteMode = pin.length > 0;
 
   if (offerBio) {
@@ -155,7 +156,7 @@ export function LockScreen({ mode, title, detail, onDone, onCancel }: {
         <div className="lock-offer">
           <Icon name="faceid" size={44} />
           <h2 className="title-2">Use Face ID or fingerprint?</h2>
-          <p className="subhead">Sign for your agents with a glance or a touch. Your PIN still works.</p>
+          <p className="subhead">Approve changes with Face ID or your fingerprint. Your PIN still works.</p>
           <button className="btn primary block" disabled={busy} onClick={async () => {
             setBusy(true);
             try { await enrollBiometrics(offerBio); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); onDone({ pin: offerBio }); }
@@ -171,7 +172,7 @@ export function LockScreen({ mode, title, detail, onDone, onCancel }: {
       <LockArt />
       <div className="lock-text">
         <strong>{heading}</strong>
-        <span>{err ?? sub}</span>
+        <span className={err ? "error" : ""} role={err ? "alert" : undefined}>{err ?? sub}</span>
       </div>
       <div className={`lock-dots ${shake ? "shake" : ""} ${err ? "error" : ""}`} aria-label={`${pin.length} of 4 digits entered`}>
         {[0, 1, 2, 3].map((i) => <i key={i} className={i < pin.length ? "on" : ""} />)}
@@ -194,54 +195,145 @@ export function LockScreen({ mode, title, detail, onDone, onCancel }: {
   );
 }
 
-/** The design's hero: PayPal mark in rings with floating soft 3D objects (CSS stand-ins for the renders). */
+/** The PayPal mark, nothing else: the PIN screen stays calm and matches the rest of the app. */
 function LockArt() {
-  return (
-    <div className="lock-art" aria-hidden="true">
-      <span className="ring r2" />
-      <span className="ring r1" />
-      <span className="lock-mark"><Mark size={70} /></span>
-      <span className="fl safe"><i /></span>
-      <span className="fl coin" />
-      <span className="fl coupon">%</span>
-      <span className="fl cash"><i /></span>
-      <span className="fl blur-a" />
-      <span className="fl blur-b" />
-    </div>
-  );
+  return <span className="lock-mark" aria-hidden="true"><Mark size={44} /></span>;
 }
 
 /* ------------------------------------ Signer context ------------------------------------ */
 
-type SignFn = (req: { title: string; detail?: string }) => Promise<Signature | null>;
+/** What the person is approving, shown Apple Pay style before the PIN / Face ID step. */
+export interface Approval {
+  amount?: number;
+  rows: { label: string; value: string; tone?: "ok" | "danger" }[];
+  note?: string;
+}
+type SignReq = { title: string; detail?: string; approval?: Approval };
+type SignFn = (req: SignReq) => Promise<Signature | null>;
 const SignerCtx = createContext<SignFn>(async () => null);
 export const useSigner = () => useContext(SignerCtx);
 
-/** Provides `sign()` to the app: opens the pad over the screen and resolves with the signature. */
+/** Words for the confirmation moment after a signature: what is happening, then what happened. */
+export interface Progress { working: string; done: string }
+type RunFn = (p: Progress, fn: () => Promise<unknown>) => Promise<boolean>;
+const ProgressCtx = createContext<RunFn>(async (_p, fn) => { await fn(); return true; });
+
+type Overlay = { phase: "working" | "done" | "error" | "leaving"; text: string; slow?: boolean };
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Provides `sign()` to the app: shows the summary (if any), then the pad, and resolves with the signature. */
 export function SignerProvider({ children }: { children: ReactNode }) {
-  const [req, setReq] = useState<{ title: string; detail?: string; resolve: (s: Signature | null) => void } | null>(null);
-  const sign = useCallback<SignFn>((r) => new Promise((resolve) => setReq({ ...r, resolve })), []);
+  const [req, setReq] = useState<(SignReq & { resolve: (s: Signature | null) => void; stage: "review" | "pin" }) | null>(null);
+  const sign = useCallback<SignFn>((r) => new Promise((resolve) => setReq({ ...r, resolve, stage: r.approval ? "review" : "pin" })), []);
+  const cancel = () => { req?.resolve(null); setReq(null); };
+
+  // The confirmation moment: blur + glow + "working" pill, then a check only once the server confirms.
+  const [ov, setOv] = useState<Overlay | null>(null);
+  const run = useCallback<RunFn>(async (p, fn) => {
+    setOv({ phase: "working", text: p.working });
+    const slow = setTimeout(() => setOv((o) => (o && o.phase === "working" ? { ...o, slow: true } : o)), 10_000);
+    try {
+      await Promise.all([fn(), wait(900)]); // at least long enough to read, never faster than the real request
+      clearTimeout(slow);
+      setOv({ phase: "done", text: p.done });
+      navigator.vibrate?.(15);
+      await wait(1500);
+      setOv((o) => (o?.phase === "done" ? { ...o, phase: "leaving" } : o));
+      await wait(320);
+      setOv((o) => (o?.phase === "leaving" ? null : o));
+      return true;
+    } catch (e) {
+      clearTimeout(slow);
+      setOv({ phase: "error", text: (e as Error).message || "That didn't go through. Nothing changed." });
+      return false;
+    }
+  }, []);
+
   return (
     <SignerCtx.Provider value={sign}>
+    <ProgressCtx.Provider value={run}>
       {children}
-      {req && (
+      {ov && <ProgressOverlay ov={ov} close={() => setOv(null)} />}
+      {req?.stage === "review" && req.approval && (
+        <ApprovalSheet title={req.title} approval={req.approval} onContinue={() => setReq({ ...req, stage: "pin" })} onCancel={cancel} />
+      )}
+      {req?.stage === "pin" && (
         <LockScreen
           mode="sign"
           title={req.title}
           detail={req.detail}
           onDone={(s) => { req.resolve(s); setReq(null); }}
-          onCancel={() => { req.resolve(null); setReq(null); }}
+          onCancel={cancel}
         />
       )}
+    </ProgressCtx.Provider>
     </SignerCtx.Provider>
   );
 }
 
-/** A button that asks for your PIN / Face ID, then hands the signature to `onSigned`. */
-export function SignButton({ title, detail, onSigned, children, disabled, tone = "primary", className = "" }: {
-  title: string; detail?: string; onSigned: (sig: Signature) => unknown; children: ReactNode; disabled?: boolean; tone?: "primary" | "danger"; className?: string;
+function ProgressOverlay({ ov, close }: { ov: Overlay; close: () => void }) {
+  const icon = ov.phase === "working"
+    ? <span className="ov-spin" aria-hidden="true" />
+    : ov.phase === "error"
+      ? <span className="ov-icon err" aria-hidden="true"><Icon name="alert" size={14} stroke={2.6} /></span>
+      : <span className="ov-icon ok" aria-hidden="true"><Icon name="check" size={14} stroke={3} /></span>;
+  // Errors: short headline in the pill, the detail underneath.
+  const [head, ...rest] = ov.phase === "error" ? ov.text.replace(/\bError:\s*/g, "").split(/(?<=\.)\s+/) : [ov.text];
+  return (
+    <div className={`progress-ov ${ov.phase}`} onClick={ov.phase === "done" ? close : undefined}>
+      <div className="ov-glow" aria-hidden="true" />
+      <div className="ov-center">
+        <div className="ov-pill" key={ov.phase === "leaving" ? "done" : ov.phase} role={ov.phase === "error" ? "alert" : "status"} aria-live="polite">
+          {icon}<span>{head}</span>
+        </div>
+        {ov.phase === "error" && <p className="ov-note">{rest.length ? `${rest.join(" ")} ` : ""}Nothing was charged or changed.</p>}
+        {ov.slow && ov.phase === "working" && <p className="ov-note">Still working. You can close this; the result will show in the app.</p>}
+        {(ov.phase === "error" || ov.slow) && <button className="btn sm cta ov-close" autoFocus onClick={close}>Close</button>}
+      </div>
+    </div>
+  );
+}
+
+function ApprovalSheet({ title, approval, onContinue, onCancel }: { title: string; approval: Approval; onContinue: () => void; onCancel: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onCancel();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+  return (
+    <div className="sheet-scrim approve-scrim" onClick={onCancel}>
+      <div className="sheet approve-sheet" role="dialog" aria-modal="true" aria-labelledby="approve-title" onClick={(e) => e.stopPropagation()}>
+        <div className="approve-head">
+          <Mark size={26} />
+          <strong id="approve-title" className="headline grow">{title}</strong>
+          <button className="icon-btn sheet-close-inline" aria-label="Cancel" onClick={onCancel}><Icon name="close" size={18} /></button>
+        </div>
+        {approval.amount !== undefined && <div className="approve-amount"><Money value={approval.amount} size="title" /></div>}
+        <dl className="approve-rows">
+          {approval.rows.map((r) => (
+            <div key={r.label} className="approve-row">
+              <dt>{r.label}</dt>
+              <dd className={r.tone ? `${r.tone}-text` : ""}>{r.value}</dd>
+            </div>
+          ))}
+        </dl>
+        {approval.note && <p className="footnote muted">{approval.note}</p>}
+        <button className="btn primary block" onClick={onContinue} autoFocus><Icon name="faceid" size={18} />Approve with PIN or Face ID</button>
+        <button className="btn ghost block" onClick={onCancel}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+/** A button that shows the summary, asks for your PIN / Face ID, then hands the signature to `onSigned`. */
+export function SignButton({ title, detail, approval, progress, onSigned, children, disabled, tone = "primary", className = "" }: {
+  title: string; detail?: string; approval?: Approval;
+  /** When given, the signed action plays the confirmation moment. `onSigned` must throw on failure. */
+  progress?: Progress;
+  onSigned: (sig: Signature) => unknown; children: ReactNode; disabled?: boolean; tone?: "primary" | "danger"; className?: string;
 }) {
   const sign = useSigner();
+  const run = useContext(ProgressCtx);
   const [busy, setBusy] = useState(false);
   return (
     <button
@@ -249,10 +341,13 @@ export function SignButton({ title, detail, onSigned, children, disabled, tone =
       className={`btn ${tone} block ${className}`}
       disabled={disabled || busy}
       onClick={async () => {
-        const sig = await sign({ title, detail });
+        const sig = await sign({ title, detail, approval });
         if (!sig) return;
         setBusy(true);
-        try { await onSigned(sig); } finally { setBusy(false); }
+        try {
+          if (progress) await run(progress, () => Promise.resolve(onSigned(sig)));
+          else await onSigned(sig);
+        } finally { setBusy(false); }
       }}
     >
       {busy ? <span className="spinner" /> : <Icon name="faceid" size={18} />}

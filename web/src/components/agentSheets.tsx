@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { api, money, type AppState, type AskMode, type MandateDraft, type Pocket } from "../api";
 import { Icon } from "./Icon";
-import { AGENT_COLORS, AgentOrb } from "./agent";
-import { SignButton, type Signature } from "./lock";
+import { AGENT_COLORS, AgentIcon, PALETTE, activeMandate, agentTone, limitsLine, suggestPocketName, toneOf } from "./agent";
+import { SignButton, useSigner, type Signature } from "./lock";
 import { MandateChips, type Act } from "./purchase";
 import { Segmented } from "./ui";
 
@@ -17,7 +17,7 @@ export function RuleReview({ draft, setDraft, source }: { draft: MandateDraft; s
     <div className="stack">
       <div className="row between">
         <span className="headline">Check the rules</span>
-        <span className="badge blue"><Icon name={source === "ai" ? "sparkles" : "rules"} size={13} />{source === "ai" ? "Read by AI" : "Read by rules"}</span>
+        
       </div>
       <label className="field">Job<input className="input" value={draft.item} onChange={(e) => set({ item: e.target.value })} /></label>
       <div className="row" style={{ gap: 12 }}>
@@ -40,7 +40,7 @@ export function RuleReview({ draft, setDraft, source }: { draft: MandateDraft; s
       <label className="field">Never buy (optional)<input className="input" value={(draft.avoid ?? []).join(", ")} placeholder="e.g. paprika" onChange={(e) => set({ avoid: e.target.value.split(",").map((w) => w.trim().toLowerCase()).filter(Boolean) })} /></label>
       <label className="field">Expires<input className="input" type="date" value={draft.expiresAt.slice(0, 10)} onChange={(e) => e.target.value && set({ expiresAt: new Date(`${e.target.value}T23:59:59Z`).toISOString() })} /></label>
       <MandateChips m={draft} />
-      <p className="footnote muted">Plain code enforces these at checkout, not the AI.</p>
+      <p className="footnote muted">These rules are checked at checkout, before anything is paid.</p>
     </div>
   );
 }
@@ -76,99 +76,159 @@ const EXAMPLES = [
 
 /* ------------------------------------ New agent ------------------------------------ */
 
-/** 1 name + colour → 2 money → 3 job in your words → 4 check the rules, choose when it asks, hold to sign. */
+/** Focus a field once the bottom sheet has finished sliding up, so the phone keyboard doesn't jolt the animation. */
+const focusAfterSheet = (el: HTMLInputElement | null) => {
+  if (!el) return;
+  setTimeout(() => el.focus({ preventScroll: true }), 420);
+};
+
+/** 1 money → 2 job in your words → 3 check the rules, name (suggested from the job), when it asks, approve. */
 export function NewAgent({ state, act, close, open }: { state: AppState; act: Act; close: () => void; open: (id: string) => void }) {
-  const used = new Set(state.pockets.map((p) => p.color));
   const [step, setStep] = useState(1);
-  const [name, setName] = useState("");
-  const [color, setColor] = useState(AGENT_COLORS.find((c) => !used.has(c)) ?? AGENT_COLORS[0]);
+  const [name, setName] = useState<string | null>(null); // null = use the suggestion
+  const color = AGENT_COLORS[0]; // stored for older clients; the UI doesn't colour-code agents
   const [amount, setAmount] = useState("150");
   const [instruction, setInstruction] = useState(EXAMPLES[0]);
   const [askMode, setAskMode] = useState<AskMode>("money");
   const d = useDraft();
-  const taken = state.pockets.some((p) => p.name.toLowerCase() === name.trim().toLowerCase());
-  const shown = name.trim() || "Your agent";
+  const suggested = suggestPocketName(d.draft?.item, state.pockets.map((p) => p.name));
+  const finalName = (name ?? suggested).trim();
+  const taken = state.pockets.some((p) => p.name.toLowerCase() === finalName.toLowerCase());
+  const shown = step === 3 ? finalName || "New pocket" : "New pocket";
 
   const create = (auth: Signature) => act(async () => {
-    const r = await api<{ agent: Pocket }>("/api/agents", { auth, name: name.trim(), color, amount: Number(amount), askMode, instruction, draft: d.draft });
+    const r = await api<{ agent: Pocket }>("/api/agents", { auth, name: finalName, color, amount: Number(amount), askMode, instruction, draft: d.draft });
     close();
     open(r.agent.id);
-  }, `${name.trim()} is ready`);
+  }, undefined, { rethrow: true });
 
   return (
     <div className="stack">
       <div className="new-agent-hero">
-        <AgentOrb name={shown} color={color} size={72} />
+        <AgentIcon item={d.draft?.item ?? (step >= 2 ? instruction : undefined)} tone={agentTone(d.draft?.item ?? (step >= 2 ? instruction : undefined))} size={64} />
         <div className="stack-xs" style={{ alignItems: "center" }}>
           <strong className="title-2">{shown}</strong>
-          <span className="caption muted">Step {step} of 4</span>
+          <span className="caption muted">Step {step} of 3</span>
         </div>
       </div>
 
       {step === 1 && (
         <>
-          <label className="field">Name your agent
-            <input className="input" autoFocus value={name} maxLength={24} placeholder="e.g. P, Sneaks, Groceries" onChange={(e) => setName(e.target.value)} />
-          </label>
-          {taken && <p className="footnote danger-text">You already have an agent called {name.trim()}.</p>}
-          <div className="stack-sm">
-            <span className="field-label">Pick its colour</span>
-            <div className="swatches" role="radiogroup" aria-label="Agent colour">
-              {AGENT_COLORS.map((c) => (
-                <button key={c} type="button" role="radio" aria-checked={color === c} aria-label={c} className={`swatch ${color === c ? "on" : ""}`} style={{ "--orb": c } as React.CSSProperties} onClick={() => setColor(c)} />
-              ))}
-            </div>
+          <p className="subhead muted">How much can this agent spend? It can't spend more than this.</p>
+          <div className="amount-input"><span>$</span><input className="input big" ref={focusAfterSheet} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} aria-label="Amount in US dollars" /></div>
+          <div className="chips">
+            {[50, 100, 150, 300].map((v) => <button key={v} className={`chip btnlike ${Number(amount) === v ? "on" : ""}`} onClick={() => setAmount(String(v))}>${v}</button>)}
           </div>
-          <button className="btn primary block" disabled={!name.trim() || taken} onClick={() => setStep(2)}>Next</button>
+          <button className="btn primary block" disabled={!(Number(amount) > 0)} onClick={() => setStep(2)}>Next</button>
         </>
       )}
 
       {step === 2 && (
         <>
-          <p className="subhead muted">How much can {shown} spend? It can never touch anything outside this.</p>
-          <div className="amount-input"><span>$</span><input className="input big" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} aria-label="Amount in US dollars" /></div>
-          <div className="chips">
-            {[50, 100, 150, 300].map((v) => <button key={v} className={`chip btnlike ${Number(amount) === v ? "on" : ""}`} onClick={() => setAmount(String(v))}>${v}</button>)}
-          </div>
-          <div className="row" style={{ gap: 8 }}>
-            <button className="btn ghost" onClick={() => setStep(1)}>Back</button>
-            <button className="btn primary grow" disabled={!(Number(amount) > 0)} onClick={() => setStep(3)}>Next</button>
-          </div>
-        </>
-      )}
-
-      {step === 3 && (
-        <>
-          <p className="subhead muted">What is {shown}'s one job? Say it in your own words, with your limits.</p>
+          <p className="subhead muted">What should it buy? Describe it in your own words, with your limits.</p>
           <textarea className="input textarea" value={instruction} onChange={(e) => setInstruction(e.target.value)} aria-label="The job in your words" />
           <div className="chips">{EXAMPLES.slice(1).map((x) => <button key={x} className="chip btnlike" onClick={() => setInstruction(x)}>{x.split(",")[0]}</button>)}</div>
           {d.err && <p className="footnote danger-text">{d.err}</p>}
           <div className="row" style={{ gap: 8 }}>
-            <button className="btn ghost" onClick={() => setStep(2)}>Back</button>
-            <button className="btn primary grow" disabled={d.busy || !instruction.trim()} onClick={async () => { if (await d.read(instruction)) setStep(4); }}>
-              {d.busy ? <><span className="spinner" />Reading your words…</> : "Turn into rules"}
+            <button className="btn ghost" onClick={() => setStep(1)}>Back</button>
+            <button className="btn primary grow" disabled={d.busy || !instruction.trim()} onClick={async () => { if (await d.read(instruction)) setStep(3); }}>
+              {d.busy ? <><span className="spinner" />Creating rules…</> : "Create rules"}
             </button>
           </div>
         </>
       )}
 
-      {step === 4 && d.draft && (
+      {step === 3 && d.draft && (
         <>
+          <label className="field">Name
+            <input className="input" value={name ?? suggested} maxLength={24} onChange={(e) => setName(e.target.value)} aria-describedby="name-hint" />
+          </label>
+          <p id="name-hint" className={`footnote ${taken ? "danger-text" : "muted"}`}>{taken ? `You already have an agent called ${finalName}.` : "Suggested from its job. You can change it any time."}</p>
           <RuleReview draft={d.draft} setDraft={d.setDraft} source={d.source} />
           <div className="stack-sm">
             <span className="headline">When should {shown} ask you?</span>
             <Segmented<AskMode> value={askMode} onChange={setAskMode} options={[{ value: "anything", label: "About anything" }, { value: "money", label: "Only about money" }]} />
-            <p className="footnote muted">{askMode === "anything" ? "Every purchase waits for your tap." : "Buys on its own inside the rules; asks when money or a limit is involved."}</p>
+            <p className="footnote muted">{askMode === "anything" ? "Every purchase waits for your approval." : "Buys on its own within the rules. Asks you when a limit is involved."}</p>
           </div>
-          <div className="card summary-card" style={{ "--orb": color } as React.CSSProperties}>
-            <AgentOrb name={shown} color={color} size={36} />
-            <p className="footnote grow"><strong>{shown}</strong> gets <strong>{money(Number(amount))}</strong> for one job: <span className="capitalize">{d.draft.item}</span>. Out of bounds, it stops and asks you.</p>
+          <div className="card summary-card">
+            <AgentIcon item={d.draft.item} tone={agentTone(d.draft.item)} size={36} />
+            <p className="footnote grow"><strong>{shown}</strong> gets <strong>{money(Number(amount))}</strong> to buy <span className="capitalize">{d.draft.item}</span>. If something doesn't fit your rules, it asks you first.</p>
           </div>
-          <SignButton title={`Create ${shown}`} detail={`${money(Number(amount))} for one job: ${d.draft.item}`} onSigned={create} disabled={!(d.draft.maxUnitPrice > 0) || !d.draft.item.trim()}>Create &amp; sign</SignButton>
-          <button className="btn ghost block" onClick={() => setStep(3)}>Back</button>
+          <SignButton progress={{ working: `Setting up ${finalName}`, done: `${finalName} is ready` }} title={`Create ${shown}`} detail={`${money(Number(amount))} for one job: ${d.draft.item}`} approval={{ amount: Number(amount), rows: [{ label: "Agent", value: shown }, { label: "Job", value: d.draft.item }, { label: "Limits", value: limitsLine(d.draft) }, { label: "Asks you", value: askMode === "anything" ? "Before every purchase" : "When a limit is involved" }], note: "This amount moves into the agent's pocket. It can't spend more than this." }} onSigned={create} disabled={!finalName || taken || !(d.draft.maxUnitPrice > 0) || !d.draft.item.trim()}>Create agent</SignButton>
+          <button className="btn ghost block" onClick={() => setStep(2)}>Back</button>
         </>
       )}
     </div>
+  );
+}
+
+/* ------------------------------------ Edit (name and colour) ------------------------------------ */
+
+/** Edit an agent's name and colour. No PIN: neither moves money. Undo is offered from the toast. */
+export function RenameAgent({ state, agentId, close, show, refresh }: {
+  state: AppState; agentId: string; close: () => void;
+  show: (t: string, e?: boolean, action?: { label: string; run: () => void }) => void; refresh: () => Promise<void> | void;
+}) {
+  const agent = state.pockets.find((p) => p.id === agentId);
+  const item = activeMandate(state, agentId)?.mandate.item;
+  const startTone = toneOf(agent, item);
+  const [name, setName] = useState(agent?.name ?? "");
+  const [tone, setTone] = useState(startTone);
+  const [busy, setBusy] = useState(false);
+  if (!agent) return null;
+  const clean = name.trim();
+  const taken = state.pockets.some((p) => p.id !== agent.id && p.name.toLowerCase() === clean.toLowerCase());
+  const suggestion = suggestPocketName(item, state.pockets.filter((p) => p.id !== agent.id).map((p) => p.name));
+  const hexOf = (t: string) => PALETTE.find((c) => c.id === t)!.hex;
+  const changed = clean !== agent.name || tone !== startTone;
+  const save = async (patch: { name?: string; color?: string }, undo?: { name?: string; color?: string }) => {
+    setBusy(true);
+    try {
+      await api(`/api/agents/${agentId}/settings`, patch);
+      show(patch.name && patch.name !== agent.name ? `Renamed to ${patch.name}.` : "Saved.", false, undo ? { label: "Undo", run: () => save(undo) } : undefined);
+      close();
+    } catch (e) {
+      show((e as Error).message, true);
+    } finally {
+      setBusy(false);
+      refresh();
+    }
+  };
+  const submit = () => {
+    const patch: { name?: string; color?: string } = {};
+    const undo: { name?: string; color?: string } = {};
+    if (clean !== agent.name) { patch.name = clean; undo.name = agent.name; }
+    if (tone !== startTone) { patch.color = hexOf(tone); undo.color = agent.color ?? AGENT_COLORS[0]; }
+    save(patch, undo);
+  };
+  return (
+    <form className="stack" onSubmit={(e) => { e.preventDefault(); if (clean && !taken && changed) submit(); }}>
+      <div className="row" style={{ gap: 12 }}>
+        <AgentIcon item={item} tone={tone} size={48} />
+        <h2 className="title-2">Edit agent</h2>
+      </div>
+      <label className="field">Name
+        <input className="input" value={name} maxLength={24} onChange={(e) => setName(e.target.value)} aria-describedby="rename-hint" />
+      </label>
+      <p id="rename-hint" className={`footnote ${taken ? "danger-text" : "muted"}`}>{taken ? `You already have an agent called ${clean}.` : "Up to 24 characters. Past messages keep the old name."}</p>
+      {suggestion.toLowerCase() !== clean.toLowerCase() && (
+        <div className="chips"><button type="button" className="chip btnlike" onClick={() => setName(suggestion)}>Use “{suggestion}”</button></div>
+      )}
+      <fieldset className="swatch-field">
+        <legend className="field-label">Colour</legend>
+        <div className="swatch-row" role="radiogroup" aria-label="Agent colour">
+          {PALETTE.map((c) => (
+            <button key={c.id} type="button" role="radio" aria-checked={tone === c.id} aria-label={c.label}
+              className={`swatch-btn tone-${c.id} ${tone === c.id ? "on" : ""}`} onClick={() => setTone(c.id)}>
+              <span className="swatch-dot">{tone === c.id && <Icon name="check" size={18} stroke={3} />}</span>
+              <span className="swatch-name">{c.label}</span>
+            </button>
+          ))}
+        </div>
+        <p className="caption muted">Shows on its card, in the pile on Home and on its page.</p>
+      </fieldset>
+      <button className="btn primary block" type="submit" disabled={busy || !clean || taken || !changed}>{busy ? <span className="spinner" /> : "Save"}</button>
+    </form>
   );
 }
 
@@ -183,22 +243,22 @@ export function JobSheet({ state, agentId, act, close }: { state: AppState; agen
   return (
     <div className="stack">
       <div className="row" style={{ gap: 12 }}>
-        <AgentOrb name={agent.name} color={agent.color} size={40} />
+        <AgentIcon item={current?.item} tone={toneOf(agent, current?.item)} size={40} />
         <h2 className="title-2">{current ? `Rewrite ${agent.name}'s job` : `Give ${agent.name} a job`}</h2>
       </div>
       {!d.draft ? (
         <>
-          <p className="subhead muted">One agent, one job. {current ? "The old rules retire and stay on record." : ""}</p>
+          <p className="subhead muted">Each agent has one job. {current ? "Your current rules are kept in history." : ""}</p>
           <textarea className="input textarea" value={instruction} onChange={(e) => setInstruction(e.target.value)} aria-label="The job in your words" />
           {d.err && <p className="footnote danger-text">{d.err}</p>}
           <button className="btn primary block" disabled={d.busy || !instruction.trim()} onClick={() => d.read(instruction)}>
-            {d.busy ? <><span className="spinner" />Reading your words…</> : "Turn into rules"}
+            {d.busy ? <><span className="spinner" />Creating rules…</> : "Create rules"}
           </button>
         </>
       ) : (
         <>
           <RuleReview draft={d.draft} setDraft={d.setDraft} source={d.source} />
-          <SignButton title={`Sign ${agent.name}'s job`} detail={d.draft.item} onSigned={(auth) => act(() => api(`/api/agents/${agentId}/job`, { auth, instruction, draft: d.draft }), "New job signed").then(close)}>Sign the job</SignButton>
+          <SignButton progress={{ working: `Approving ${agent.name}'s job`, done: "Job approved" }} title={`New job for ${agent.name}`} detail={d.draft.item} approval={{ rows: [{ label: "Agent", value: agent.name }, { label: "Job", value: d.draft.item }, { label: "Limits", value: limitsLine(d.draft) }, ...(current ? [{ label: "Replaces", value: current.item }] : [])] }} onSigned={(auth) => act(() => api(`/api/agents/${agentId}/job`, { auth, instruction, draft: d.draft }), undefined, { rethrow: true }).then(close)}>Approve job</SignButton>
           <button className="btn ghost block" onClick={() => d.setDraft(null)}>Back</button>
         </>
       )}
@@ -210,7 +270,7 @@ export function JobSheet({ state, agentId, act, close }: { state: AppState; agen
 
 export function MoveMoney({ state, agentId, act, close }: { state: AppState; agentId: string; act: Act; close: () => void }) {
   const to = state.pockets.find((p) => p.id === agentId);
-  const sources = state.pockets.filter((p) => p.id !== agentId);
+  const sources = state.pockets.filter((p) => p.id !== agentId && !p.closedAt);
   const [fromId, setFromId] = useState(sources.slice().sort((a, b) => b.balance - a.balance)[0]?.id ?? "");
   const [amount, setAmount] = useState("20");
   const from = sources.find((p) => p.id === fromId);
@@ -228,8 +288,8 @@ export function MoveMoney({ state, agentId, act, close }: { state: AppState; age
             <span className="field-label">From</span>
             <div className="agent-picker">
               {sources.map((p) => (
-                <button key={p.id} className={`agent-pick ${fromId === p.id ? "on" : ""}`} style={{ "--orb": p.color } as React.CSSProperties} onClick={() => setFromId(p.id)}>
-                  <AgentOrb name={p.name} color={p.color} size={32} />
+                <button key={p.id} className={`agent-pick ${fromId === p.id ? "on" : ""}`} aria-pressed={fromId === p.id} onClick={() => setFromId(p.id)}>
+                  <AgentIcon item={activeMandate(state, p.id)?.mandate.item} tone={toneOf(p, activeMandate(state, p.id)?.mandate.item)} size={32} />
                   <span className="stack-xs"><strong className="footnote">{p.name}</strong><span className="caption muted">{money(p.balance)}</span></span>
                 </button>
               ))}
@@ -245,9 +305,134 @@ export function MoveMoney({ state, agentId, act, close }: { state: AppState; age
             </div>
           )}
           {from && amt > from.balance && <p className="footnote danger-text">{from.name} only has {money(from.balance)}.</p>}
-          <SignButton disabled={!ok} title={`Move ${money(amt || 0)}`} detail={`From ${from?.name ?? ""} to ${to.name}`} onSigned={(auth) => act(() => api(`/api/agents/${agentId}/transfer`, { auth, fromId, amount: amt }), `Moved ${money(amt)} to ${to.name}`).then(close)}>Sign to move {ok ? money(amt) : ""}</SignButton>
+          <SignButton disabled={!ok} progress={{ working: `Moving ${money(amt || 0)}`, done: `${money(amt || 0)} moved to ${to.name}` }} title="Move money" detail={`From ${from?.name ?? ""} to ${to.name}`} approval={{ amount: amt || 0, rows: [{ label: "From", value: `${from?.name ?? ""} · ${money(Math.max(0, (from?.balance ?? 0) - (amt || 0)))} after` }, { label: "To", value: `${to.name} · ${money(to.balance + (amt || 0))} after` }] }} onSigned={(auth) => act(() => api(`/api/agents/${agentId}/transfer`, { auth, fromId, amount: amt }), undefined, { rethrow: true }).then(close)}>Review and move {ok ? money(amt) : ""}</SignButton>
         </>
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------ Agent menu, close, delete ------------------------------------ */
+
+type Show = (t: string, e?: boolean, action?: { label: string; run: () => void }) => void;
+type SheetTo = (s: { kind: "move" | "rename" | "close" | "delete"; id: string } | null) => void;
+
+/** The "⋯" menu: every action for one agent, in one place. Same actions as the agent page. */
+export function AgentMenu({ state, agentId, setSheet, show, refresh }: { state: AppState; agentId: string; setSheet: SheetTo; show: Show; refresh: () => Promise<void> | void }) {
+  const a = state.pockets.find((p) => p.id === agentId);
+  if (!a) return null;
+  const hasPurchases = state.purchases.some((p) => p.pocketId === a.id);
+  const setPaused = async (paused: boolean) => {
+    setSheet(null);
+    try {
+      await api(`/api/agents/${a.id}/settings`, { paused });
+      show(paused ? `${a.name} paused. Nothing will be bought.` : `${a.name} resumed.`, false, { label: "Undo", run: () => { api(`/api/agents/${a.id}/settings`, { paused: !paused }).finally(refresh); } });
+    } catch (e) { show((e as Error).message, true); } finally { refresh(); }
+  };
+  return (
+    <div className="stack-sm">
+      <div className="row" style={{ gap: 12 }}>
+        <AgentIcon item={activeMandate(state, a.id)?.mandate.item} tone={a.closedAt ? "grey" : toneOf(a, activeMandate(state, a.id)?.mandate.item)} size={40} paused={a.paused || !!a.closedAt} />
+        <span className="stack-xs grow">
+          <h2 className="title-2 ellipsis">{a.name}</h2>
+          <span className="footnote muted">{a.closedAt ? `Closed ${new Date(a.closedAt).toLocaleDateString([], { month: "short", day: "numeric" })}` : `${money(a.balance)} left`}</span>
+        </span>
+      </div>
+      <div className="menu-list" role="list">
+        {!a.closedAt && <button role="listitem" className="menu-row" onClick={() => setSheet({ kind: "move", id: a.id })}><Icon name="swap" size={20} /><span className="grow">Move money to {a.name}</span></button>}
+        <button role="listitem" className="menu-row" onClick={() => setSheet({ kind: "rename", id: a.id })}><Icon name="pencil" size={20} /><span className="grow">Edit name and colour</span></button>
+        {!a.closedAt && <button role="listitem" className="menu-row" onClick={() => setPaused(!a.paused)}><Icon name={a.paused ? "play" : "pause"} size={20} /><span className="grow">{a.paused ? "Resume" : "Pause"}</span></button>}
+        {!a.closedAt && <button role="listitem" className="menu-row" onClick={() => setSheet({ kind: "close", id: a.id })}><Icon name="archive" size={20} /><span className="grow">Close agent</span></button>}
+        {a.closedAt && <RestoreButton state={state} agentId={a.id} after={() => setSheet(null)} />}
+        {!hasPurchases && <button role="listitem" className="menu-row destructive" onClick={() => setSheet({ kind: "delete", id: a.id })}><Icon name="trash" size={20} /><span className="grow">Delete agent</span></button>}
+      </div>
+      {hasPurchases && <p className="caption muted">Agents with purchases can be closed but not deleted. Their records protect you.</p>}
+    </div>
+  );
+}
+
+/** Restoring lets an agent spend again, so it goes through the approval sheet and PIN. */
+export function RestoreButton({ state, agentId, after }: { state: AppState; agentId: string; after?: () => void }) {
+  const a = state.pockets.find((p) => p.id === agentId);
+  if (!a) return null;
+  const m = activeMandate(state, a.id)?.mandate;
+  return (
+    <SignButton
+      title={`Restore ${a.name}`}
+      approval={{ amount: a.balance, rows: [{ label: "Agent", value: a.name }, { label: "Job", value: m?.item ?? "No job" }, ...(m ? [{ label: "Limits", value: limitsLine(m) }] : [])], note: "It can buy again within these rules." }}
+      progress={{ working: `Restoring ${a.name}`, done: `${a.name} is back` }}
+      onSigned={async (auth) => { await api(`/api/agents/${a.id}/restore`, { auth }); after?.(); }}
+    >Restore {a.name}</SignButton>
+  );
+}
+
+/** Close: consequences spelled out, nothing hidden. No PIN (it only stops spending); Undo restores with PIN. */
+export function CloseAgent({ state, agentId, close, show, refresh }: { state: AppState; agentId: string; close: () => void; show: Show; refresh: () => Promise<void> | void }) {
+  const sign = useSigner();
+  const [busy, setBusy] = useState(false);
+  const a = state.pockets.find((p) => p.id === agentId);
+  if (!a) return null;
+  const waiting = state.purchases.filter((p) => p.pocketId === a.id && p.status === "needs_approval").length;
+  const proposals = state.proposals.filter((p) => p.agentId === a.id && p.status === "pending").length;
+  const disputed = state.purchases.some((p) => p.pocketId === a.id && p.status === "disputed");
+  const name = a.name;
+
+  const restore = async () => {
+    const sig = await sign({ title: `Restore ${name}`, approval: { amount: a.balance, rows: [{ label: "Agent", value: name }], note: "It can buy again within its rules." } });
+    if (!sig) return;
+    try { await api(`/api/agents/${a.id}/restore`, { auth: sig }); show(`${name} restored.`); } catch (e) { show((e as Error).message, true); } finally { refresh(); }
+  };
+  const confirm = async () => {
+    setBusy(true);
+    const rows = [...document.querySelectorAll<HTMLElement>(".agent-row-main")];
+    const at = rows.findIndex((r) => r.dataset.agent === a.id);
+    try {
+      await api(`/api/agents/${a.id}/close`, {});
+      close();
+      show(`${name} closed.`, false, { label: "Undo", run: restore });
+      await refresh();
+      // Keep keyboard and screen-reader users in place: focus the next agent, or New agent.
+      setTimeout(() => {
+        const next = [...document.querySelectorAll<HTMLElement>(".agent-row-main")];
+        (next[Math.min(Math.max(at, 0), next.length - 1)] ?? document.querySelector<HTMLElement>(".new-agent-btn"))?.focus();
+      }, 50);
+    } catch (e) {
+      show((e as Error).message, true);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="stack">
+      <h2 className="title-2">Close {name}?</h2>
+      <ul className="consequences">
+        <li><Icon name="hand" size={18} /><span>It stops buying right away.</span></li>
+        <li><Icon name="wallet" size={18} /><span>Its {money(a.balance)} budget is set aside. No money moves; it was only a limit.</span></li>
+        {(waiting > 0 || proposals > 0) && <li><Icon name="close" size={18} /><span>{[waiting ? `${waiting} purchase${waiting === 1 ? "" : "s"} waiting for approval` : "", proposals ? `${proposals} suggested change${proposals === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ")} will be declined.</span></li>}
+        <li><Icon name="box" size={18} /><span>Purchases, receipts and Black Box records stay, so you can still get help with past orders.</span></li>
+        <li><Icon name="undo" size={18} /><span>You can restore it any time from Closed agents.</span></li>
+      </ul>
+      {disputed && <p className="footnote warn-text" role="note">A refund is in progress. You can close this agent after it settles.</p>}
+      <button className="btn cta block" disabled={busy || disputed} onClick={confirm}>{busy ? <span className="spinner" /> : "Close agent"}</button>
+      <button className="btn ghost block" onClick={close}>Cancel</button>
+    </div>
+  );
+}
+
+/** Delete: only for an agent that never bought anything, so nothing is lost. Can't be undone. */
+export function DeleteAgent({ state, agentId, close, show, refresh, after }: { state: AppState; agentId: string; close: () => void; show: Show; refresh: () => Promise<void> | void; after?: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const a = state.pockets.find((p) => p.id === agentId);
+  if (!a) return null;
+  const go = async () => {
+    setBusy(true);
+    try { await api(`/api/agents/${a.id}/delete`, {}); close(); after?.(); show(`${a.name} deleted.`); } catch (e) { show((e as Error).message, true); } finally { setBusy(false); refresh(); }
+  };
+  return (
+    <div className="stack">
+      <h2 className="title-2">Delete {a.name}?</h2>
+      <p className="subhead muted">It never bought anything, so no records are lost. Its chat and job are removed. This can't be undone.</p>
+      <button className="btn danger block" disabled={busy} onClick={go}><Icon name="trash" size={18} />{busy ? <span className="spinner" /> : "Delete agent"}</button>
+      <button className="btn ghost block" onClick={close}>Cancel</button>
     </div>
   );
 }
