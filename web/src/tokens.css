@@ -1,37 +1,57 @@
 /*
- * DESIGN TOKENS: Soft Glass v0.1, Option A "PayPal Native".
- * Every colour, font, radius, spacing, shadow and glass material in the app reads from these variables.
- * Light leads; dark follows the system setting, or is forced with <html data-theme="dark|light">.
+ * DESIGN TOKENS, PayPal Native.
+ * Every colour, font, radius, spacing and shadow in the app reads from these variables.
+ * The theme follows the system setting (light or dark). There is no in-app toggle.
  */
+
+/* PayPal Open, PayPal's brand typeface, served from PayPal's own font CDN (as paypal.com loads it).
+   It ships in three weights only: Regular 400, Medium 500, Bold 700. Never ask for other weights,
+   or the browser fakes them. */
+@font-face { font-family: "PayPal Open"; font-weight: 400; font-style: normal; font-display: swap;
+  src: url("https://www.paypalobjects.com/paypal-ui/fonts/PayPalOpen-Regular.woff2") format("woff2"), url("https://www.paypalobjects.com/paypal-ui/fonts/PayPalOpen-Regular.woff") format("woff"); }
+@font-face { font-family: "PayPal Open"; font-weight: 500; font-style: normal; font-display: swap;
+  src: url("https://www.paypalobjects.com/paypal-ui/fonts/PayPalOpen-Medium.woff2") format("woff2"), url("https://www.paypalobjects.com/paypal-ui/fonts/PayPalOpen-Medium.woff") format("woff"); }
+@font-face { font-family: "PayPal Open"; font-weight: 700; font-style: normal; font-display: swap;
+  src: url("https://www.paypalobjects.com/paypal-ui/fonts/PayPalOpen-Bold.woff2") format("woff2"), url("https://www.paypalobjects.com/paypal-ui/fonts/PayPalOpen-Bold.woff") format("woff"); }
+
 :root {
   color-scheme: light;
 
   /* Brand (PayPal) */
-  --brand-navy: #003087;      /* headings, hero gradients */
-  --brand-deep: #012169;      /* deepest navy, gradient end */
+  --brand-navy: #003087;      /* wordmark, headings on brand moments */
   --brand-blue: #0070e0;      /* primary actions, links, focus (4.8:1 on white) */
+  --brand-blue-press: #005ea6;
   --brand-blue-soft: #e6f0fd; /* selected, info chips */
-  --brand-sky: #009cde;       /* fills and glows only on light (3.1:1), never text */
+  --brand-sky: #009cde;       /* fills only, never text */
   --brand-gold: #ffc439;      /* Connect PayPal button only */
   --on-gold: #003087;
-
-  /* Chrome: the PayPal brand bar at the top of the app (dark in both themes) */
-  --chrome: #1f1f1f;
-  --chrome-text: #ffffff;
-  --chrome-muted: rgba(255, 255, 255, 0.72);
+  --mark-front: #003087;      /* white parts of the PayPal artwork, on light */
+  /* Home hero: a brand wash behind the balance, and the wallet of pockets */
+  --hero-tint: #e1ecfb;
+  --wallet-bg: #ffffff;
+  --wallet-edge: #dbe3ef;
+  --cta-bg: #0b1324;
+  --cta-fg: #ffffff;
+  --pill-soft: #eef1f5;
+  --caution-bg: #ffe7c2;
+  --caution-fg: #6b3800;
+  /* Chat light (behind the composer) */
+  --composer-fill: #ffffff;
+  --composer-chip: var(--surface-2);
+  --composer-edge: rgba(11, 19, 36, 0.08);
 
   /* Surfaces & text */
-  --bg: #f3f5f9;
+  --bg: #f5f7fa;
   --surface: #ffffff;
-  --surface-2: #f7f8fb;
+  --surface-2: #eef1f5;
   --text: #0b1324;
-  --text-muted: #5b6475;
-  --border: #e4e8f0;
+  --text-muted: #545d6e;      /* 6.3:1 on white */
+  --border: #dde2ea;
 
   /* Status: always paired with an icon and a word, never colour alone */
   --ok: #0e7c4a;
   --ok-soft: #e2f5ec;
-  --warn: #b45309;
+  --warn: #9a4a06;
   --warn-soft: #fff1db;
   --danger: #c2291d;
   --danger-soft: #fde7e4;
@@ -39,18 +59,14 @@
   --info-soft: #efe8fd;
   --switch-on: #34c759;
 
-  /* Liquid Glass materials (controls layer only) */
-  --glass-fill: linear-gradient(145deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.5));
-  --glass-thick: rgba(255, 255, 255, 0.9);
-  --glass-edge: rgba(255, 255, 255, 0.9);
-  --glass-highlight: inset 0 1.5px 0 rgba(255, 255, 255, 1);
-  --glass-blur: blur(24px) saturate(180%);
-  --glow-1: rgba(0, 112, 224, 0.16);
-  --glow-2: rgba(255, 196, 57, 0.12);
+  /* Glass: controls that float over content (tab bar, composer, toast) only */
+  --glass-fill: rgba(255, 255, 255, 0.82);
+  --glass-edge: rgba(11, 19, 36, 0.08);
+  --glass-blur: blur(20px) saturate(180%);
 
-  /* Type: SF Pro on Apple, Inter elsewhere. Sizes follow Apple Dynamic Type defaults. */
-  --font-sans: "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
-  --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+  /* Type: PayPal Open. Sizes follow Apple Dynamic Type defaults. */
+  --font-sans: "PayPal Open", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --text-xs: 12px;     /* caption */
   --text-sm: 13px;     /* footnote */
   --text-md: 15px;     /* subhead */
@@ -58,14 +74,14 @@
   --text-lg: 20px;     /* title 3 */
   --text-xl: 22px;     /* title 2 */
   --text-2xl: 34px;    /* large title */
-  --text-display: 48px;/* balance */
+  --text-display: 44px;/* balance */
 
   /* Shape: concentric radii (inner = outer - padding) */
   --radius-sm: 10px;
   --radius-md: 14px;   /* controls */
-  --radius-lg: 20px;   /* inner cards */
-  --radius-xl: 28px;   /* cards */
-  --radius-sheet: 32px;
+  --radius-lg: 18px;   /* inner cards */
+  --radius-xl: 24px;   /* cards */
+  --radius-sheet: 28px;
   --radius-pill: 999px;
 
   /* Space: 4pt base, 8pt rhythm */
@@ -79,80 +95,54 @@
   --gutter: 20px;
   --tap: 44px;
 
-  /* Elevation */
-  --shadow-sm: 0 1px 2px rgba(11, 19, 36, 0.04), 0 4px 14px rgba(11, 19, 36, 0.05);
-  --shadow-md: 0 1px 2px rgba(11, 19, 36, 0.04), 0 8px 24px rgba(11, 19, 36, 0.07);
-  --shadow-glass: 0 12px 40px rgba(0, 48, 135, 0.14), 0 2px 6px rgba(0, 48, 135, 0.06);
-  --shadow-sheet: 0 -10px 40px rgba(11, 19, 36, 0.16);
-  --shadow-blue: 0 14px 30px rgba(0, 48, 135, 0.3);
-  --shadow-phone: 0 40px 90px rgba(0, 30, 90, 0.28);
+  /* Elevation: one soft level for cards, one for floating controls */
+  --shadow-sm: 0 1px 2px rgba(11, 19, 36, 0.05);
+  --shadow-md: 0 1px 2px rgba(11, 19, 36, 0.04), 0 2px 8px rgba(11, 19, 36, 0.04);
+  --shadow-float: 0 8px 28px rgba(11, 19, 36, 0.12), 0 1px 3px rgba(11, 19, 36, 0.06);
+  --shadow-sheet: 0 -8px 30px rgba(11, 19, 36, 0.12);
+  --shadow-phone: 0 30px 70px rgba(11, 19, 36, 0.22);
   --scrim: rgba(8, 14, 28, 0.38);
 }
 
-/* Dark values, shared by the system preference and the manual override. */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
+  :root {
     color-scheme: dark;
-    --brand-navy: #0a2a6e;
     --brand-blue: #4da3ff;
-    --brand-blue-soft: #122544;
-    --chrome: #111318;
-    --bg: #0b0f17;
-    --surface: #141a26;
-    --surface-2: #1b2333;
-    --text: #eef2f8;
-    --text-muted: #a5afc2;
-    --border: #232c3d;
-    --ok: #34c759;
-    --ok-soft: #0f2e22;
+    --brand-blue-press: #79b9ff;
+    --brand-blue-soft: #14284a;
+    --mark-front: #ffffff;
+    --hero-tint: #0b2c70;     /* PayPal navy fading into black */
+    --wallet-bg: #0f1a33;
+    --wallet-edge: rgba(255, 255, 255, 0.1);
+    --cta-bg: #f6f1e6;        /* cream pill */
+    --cta-fg: #0b1324;
+    --pill-soft: rgba(255, 255, 255, 0.12);
+    --caution-bg: rgba(255, 179, 64, 0.22);
+    --caution-fg: #ffd08a;
+    --composer-fill: #1c1e24;               /* solid, like Gemini's input */
+    --composer-chip: #262932;
+    --composer-edge: rgba(255, 255, 255, 0.08);
+    --bg: #000000;
+    --surface: #16181d;
+    --surface-2: #23262d;
+    --text: #f2f4f8;
+    --text-muted: #a3aab8;
+    --border: #2c3039;
+    --ok: #4cd480;
+    --ok-soft: #10301f;
     --warn: #ffb340;
     --warn-soft: #33260c;
     --danger: #ff6b5e;
     --danger-soft: #3a1714;
     --info: #b79cff;
     --info-soft: #231a45;
-    --glass-fill: linear-gradient(145deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.05));
-    --glass-thick: rgba(24, 30, 44, 0.94);
-    --glass-edge: rgba(255, 255, 255, 0.14);
-    --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.18);
-    --glow-1: rgba(22, 52, 110, 0.75);
-    --glow-2: rgba(0, 156, 222, 0.08);
-    --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 6px 18px rgba(0, 0, 0, 0.35);
-    --shadow-md: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 10px 30px rgba(0, 0, 0, 0.4);
-    --shadow-glass: 0 16px 40px rgba(0, 0, 0, 0.45);
-    --shadow-blue: 0 14px 30px rgba(0, 0, 0, 0.45);
-    --scrim: rgba(0, 0, 0, 0.55);
+    --glass-fill: rgba(30, 32, 38, 0.82);
+    --glass-edge: rgba(255, 255, 255, 0.09);
+    --shadow-sm: none;
+    --shadow-md: none;
+    --shadow-float: 0 10px 30px rgba(0, 0, 0, 0.5);
+    --shadow-sheet: 0 -8px 30px rgba(0, 0, 0, 0.5);
+    --shadow-phone: 0 30px 70px rgba(0, 0, 0, 0.6);
+    --scrim: rgba(0, 0, 0, 0.6);
   }
-}
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --brand-navy: #0a2a6e;
-  --brand-blue: #4da3ff;
-  --brand-blue-soft: #122544;
-  --chrome: #111318;
-  --bg: #0b0f17;
-  --surface: #141a26;
-  --surface-2: #1b2333;
-  --text: #eef2f8;
-  --text-muted: #a5afc2;
-  --border: #232c3d;
-  --ok: #34c759;
-  --ok-soft: #0f2e22;
-  --warn: #ffb340;
-  --warn-soft: #33260c;
-  --danger: #ff6b5e;
-  --danger-soft: #3a1714;
-  --info: #b79cff;
-  --info-soft: #231a45;
-  --glass-fill: linear-gradient(145deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.05));
-  --glass-thick: rgba(24, 30, 44, 0.94);
-  --glass-edge: rgba(255, 255, 255, 0.14);
-  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.18);
-  --glow-1: rgba(22, 52, 110, 0.75);
-  --glow-2: rgba(0, 156, 222, 0.08);
-  --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 6px 18px rgba(0, 0, 0, 0.35);
-  --shadow-md: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 10px 30px rgba(0, 0, 0, 0.4);
-  --shadow-glass: 0 16px 40px rgba(0, 0, 0, 0.45);
-  --shadow-blue: 0 14px 30px rgba(0, 0, 0, 0.45);
-  --scrim: rgba(0, 0, 0, 0.55);
 }

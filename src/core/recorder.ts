@@ -10,6 +10,7 @@ import { canonicalJson, sha256 } from "./canonical.ts";
 export type EntryKind =
   | "instruction"
   | "mandate_signed"
+  | "discovery"
   | "page_snapshot"
   | "agent_claim"
   | "guard_decision"
@@ -18,7 +19,11 @@ export type EntryKind =
   | "delivery_reading"
   | "merchant_response"
   | "verdict"
-  | "paypal_resolution";
+  | "paypal_resolution"
+  | "proposal"
+  | "proposal_decision"
+  | "exception_ended"
+  | "transfer";
 
 export interface Entry {
   seq: number;
@@ -67,7 +72,11 @@ export class FlightRecorder {
 
   append(purchaseId: string, kind: EntryKind, payload: unknown, now: Date = new Date()): Entry {
     const prevHash = this.entries.at(-1)?.hash ?? GENESIS;
-    const base = { seq: this.entries.length, ts: now.toISOString(), purchaseId, kind, payload, prevHash };
+    // Seal a snapshot, not a live reference: callers keep mutating their objects (a proposal's
+    // status, a purchase's decision) and that must never rewrite history. The JSON round-trip
+    // also makes the in-memory entry identical to what is persisted and reloaded.
+    const sealed = payload === undefined ? null : JSON.parse(JSON.stringify(payload));
+    const base = { seq: this.entries.length, ts: now.toISOString(), purchaseId, kind, payload: sealed, prevHash };
     const entry: Entry = { ...base, hash: hashEntry(base) };
     this.entries.push(entry);
     if (this.file) appendFileSync(this.file, JSON.stringify(entry) + "\n");

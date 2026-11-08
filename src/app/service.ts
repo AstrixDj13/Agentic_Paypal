@@ -2,17 +2,20 @@ import { randomUUID } from "node:crypto";
 import { arbitrate } from "../core/arbiter.ts";
 import { checkOrder } from "../core/guard.ts";
 import { signMandate } from "../core/mandate.ts";
-import { FlightRecorder } from "../core/recorder.ts";
-import type { GuardState, Mandate, Pocket, SignedMandate } from "../core/types.ts";
+import type { AskMode, GuardState, Mandate, Pocket, SignedMandate } from "../core/types.ts";
 import * as agents from "../agent/agents.ts";
 import { PayPalClient, PayPalError, approveLink } from "../paypal/client.ts";
 import * as pp from "../paypal/api.ts";
 import * as store from "../store/catalog.ts";
+import * as channel3 from "../store/channel3.ts";
 import { loadState, saveState, userKey, type Purchase, type Resolution } from "./state.ts";
+import { recorder } from "./ledger.ts";
+import { endException, exceptionOf, notifyPurchase, postMessage, proposeRuleChange, sweepExceptions } from "./chat.ts";
+import { AGENT_COLORS } from "./state.ts";
 
 /** Orchestrates the buy path (agent -> guard -> PayPal) and the dispute path (photo -> arbiter -> PayPal). */
 
-export const recorder = new FlightRecorder("data/ledger.jsonl");
+export { recorder };
 
 const env = (k: string) => process.env[k] ?? "";
 let storeClient: PayPalClient | undefined;
@@ -48,16 +51,20 @@ export async function finishPaypalConnect(): Promise<void> {
 
 /* ---------------------------------------- Pockets ---------------------------------------- */
 
-export function createPocket(name: string, amount: number): Pocket {
-  if (!name.trim() || !(amount > 0)) throw new UserError("Pocket needs a name and a positive amount.");
+export function createPocket(name: string, amount: number, opts: { color?: string; askMode?: AskMode } = {}): Pocket {
+  if (!name.trim() || !(amount > 0)) throw new UserError("An agent needs a name and a positive amount.");
   const s = loadState();
-  const pocket: Pocket = { id: `pk_${randomUUID().slice(0, 8)}`, name: name.trim(), balance: round2(amount), currency: "USD" };
+  const color = opts.color && /^#[0-9a-f]{6}$/i.test(opts.color) ? opts.color : AGENT_COLORS[s.pockets.length % AGENT_COLORS.length];
+  const pocket: Pocket = {
+    id: `pk_${randomUUID().slice(0, 8)}`, name: name.trim().slice(0, 24), balance: round2(amount), currency: "USD",
+    color, askMode: opts.askMode === "anything" ? "anything" : "money", paused: false, createdAt: new Date().toISOString(),
+  };
   s.pockets.push(pocket);
   saveState();
   return pocket;
 }
 
-function pocketOf(id: string): Pocket {
+export function pocketOf(id: string): Pocket {
   const p = loadState().pockets.find((x) => x.id === id);
   if (!p) throw new UserError(`Unknown pocket ${id}`);
   return p;
@@ -70,7 +77,11 @@ export async function draftMandate(instruction: string) {
   return agents.parseInstruction(instruction);
 }
 
-export function signNewMandate(pocketId: string, instruction: string, rawDraft: agents.MandateDraft): SignedMandate {
+/**
+ * Signs the agent's one job. One agent, one job: any other active rule for this agent retires
+ * (kept for history and for old purchases). `keepException` is used when signing a temporary rule.
+ */
+export function signNewMandate(pocketId: string, instruction: string, rawDraft: agents.MandateDraft, opts: { keepException?: boolean } = {}): SignedMandate {
   pocketOf(pocketId);
   const draft = agents.sanitizeDraft(rawDraft);
   if (!draft) throw new UserError("Rules need an item and a positive max price.");
@@ -85,11 +96,15 @@ export function signNewMandate(pocketId: string, instruction: string, rawDraft: 
     maxUnitPrice: Number(draft.maxUnitPrice),
     currency: "USD",
     maxQuantity: Math.max(1, Number(draft.maxQuantity) || 1),
+    ...(draft.avoid?.length ? { avoid: draft.avoid } : {}),
     merchants: [store.MERCHANT_ID],
     expiresAt: draft.expiresAt,
     createdAt: new Date().toISOString(),
   };
   const signed = signMandate(mandate, userKey());
+  if (!opts.keepException) s.exceptions = s.exceptions.filter((e) => e.agentId !== pocketId);
+  for (const old of s.mandates.filter((m) => m.mandate.pocketId === pocketId)) s.retiredMandates.push(old);
+  s.mandates = s.mandates.filter((m) => m.mandate.pocketId !== pocketId);
   s.mandates.push(signed);
   saveState();
   recorder.append(mandate.id, "instruction", { text: instruction });
@@ -97,7 +112,7 @@ export function signNewMandate(pocketId: string, instruction: string, rawDraft: 
   return signed;
 }
 
-function mandateOf(id: string): SignedMandate {
+export function mandateOf(id: string): SignedMandate {
   const s = loadState();
   const m = s.mandates.find((x) => x.mandate.id === id) ?? s.retiredMandates.find((x) => x.mandate.id === id);
   if (!m) throw new UserError(`Unknown mandate ${id}`);
@@ -106,11 +121,11 @@ function mandateOf(id: string): SignedMandate {
 
 /* ---------------------------------------- Guard state ---------------------------------------- */
 
-function guardState(): GuardState {
+function guardState(pocket?: Pocket): GuardState {
   const s = loadState();
   const today = new Date().toISOString().slice(0, 10);
   const purchasesToday = s.purchases.filter((p) => p.paypal && p.createdAt.startsWith(today)).length;
-  return { killSwitch: s.killSwitch, maxPurchasesPerDay: s.maxPurchasesPerDay, purchasesToday, knownMerchants: s.knownMerchants };
+  return { killSwitch: s.killSwitch, maxPurchasesPerDay: s.maxPurchasesPerDay, purchasesToday, knownMerchants: s.knownMerchants, askEveryPurchase: pocket?.askMode === "anything" };
 }
 
 export function setKillSwitch(on: boolean): void {
@@ -125,17 +140,32 @@ export interface RunResult {
   skipped?: string;
 }
 
-export async function runAgent(mandateId: string, opts: { mode?: agents.AgentMode; productId?: string; baseUrl: string }): Promise<RunResult> {
+export async function runAgent(mandateId: string, opts: { mode?: agents.AgentMode; productId?: string; productIds?: string[]; baseUrl: string; quiet?: boolean }): Promise<RunResult> {
+  sweepExceptions();
   const signed = mandateOf(mandateId);
   const mode = opts.mode ?? "careful";
-  const candidates = opts.productId ? [store.getProduct(opts.productId)].filter((p): p is store.Product => !!p) : store.listProducts();
+  const ids = opts.productIds ?? (opts.productId ? [opts.productId] : null);
+  const candidates = ids ? ids.map((id) => store.getProduct(id)).filter((p): p is store.Product => !!p) : store.listProducts();
   const choice = await agents.chooseProduct(signed.mandate, candidates, mode);
-  if (!choice.order) return { skipped: choice.skipped };
+  if (!choice.order) {
+    const m = signed.mandate;
+    if (choice.nearMiss) {
+      // Out of bounds: stop, tell the user, and offer a one-time exception they can sign.
+      const { product, overBy } = choice.nearMiss;
+      const prop = proposeRuleChange(m.pocketId, m, { maxUnitPrice: product.unitPrice }, "once", undefined, product.id);
+      postMessage(m.pocketId, "agent", `I found ${product.title} for $${product.unitPrice}. It fits everything except your $${m.maxUnitPrice} limit ($${overBy} over), so I didn't buy it. Want to make an exception just this once?`, { proposalId: prop?.id, needsYou: true });
+      saveState();
+    } else if (!opts.quiet) {
+      postMessage(m.pocketId, "agent", `Checked the store: ${choice.skipped}`);
+      saveState();
+    }
+    return { skipped: choice.skipped };
+  }
 
   const product = store.getProduct(choice.order.productId)!;
   const snapshot = store.snapshotOf(product, opts.baseUrl);
   const pocket = pocketOf(signed.mandate.pocketId);
-  const decision = checkOrder(signed, choice.order, pocket, guardState());
+  const decision = checkOrder(signed, choice.order, pocket, guardState(pocket));
 
   const purchase: Purchase = {
     id: `pu_${randomUUID().slice(0, 8)}`,
@@ -158,7 +188,59 @@ export async function runAgent(mandateId: string, opts: { mode?: agents.AgentMod
   saveState();
 
   if (decision.outcome === "allow") await executePurchase(purchase);
+  notifyPurchase(purchase, signed.mandate);
+  saveState();
   return { purchase };
+}
+
+/* ------------------------------- Real products (Channel3) ------------------------------- */
+
+export interface FoundProduct {
+  product: store.Product;
+  /** Why it does not fit the rules; empty = it fits. */
+  reasons: string[];
+}
+
+/**
+ * "Find it for me": searches real stores via Channel3 for the rule, shows what fits and what
+ * doesn't, then lets the careful agent buy the best fit through the normal guard + PayPal path.
+ */
+export async function findAndBuy(mandateId: string, baseUrl: string): Promise<RunResult & { found: FoundProduct[] }> {
+  if (!channel3.channel3Enabled()) throw new UserError("Real-store search is off (CHANNEL3_API_KEY not set).");
+  const m = mandateOf(mandateId).mandate;
+  let real: store.Product[];
+  try {
+    real = await channel3.findForRules({ item: m.item, brands: m.allowed.brand ?? [], maxPrice: m.maxUnitPrice, size: m.required.size_us });
+  } catch (e) {
+    throw new UserError(`Real-store search failed: ${(e as Error).message}`);
+  }
+  const imported = store.importProducts(real);
+  const found = imported
+    .map((product) => ({ product, reasons: agents.fitReasons(m, product) }))
+    .sort((a, b) => a.reasons.length - b.reasons.length || a.product.unitPrice - b.product.unitPrice);
+  recorder.append(mandateId, "discovery", {
+    source: "channel3",
+    results: found.map((f) => ({ id: f.product.id, title: f.product.title, unitPrice: f.product.unitPrice, domain: f.product.source?.domain, fits: f.reasons.length === 0, reasons: f.reasons })),
+  });
+
+  const fits = found.filter((f) => f.reasons.length === 0).map((f) => f.product.id);
+  postMessage(m.pocketId, "agent", `Searched ${found.length} real listings via Channel3. ${fits.length} prove they match your rules.${fits.length ? "" : " I'll keep watching."}`);
+  saveState();
+  if (fits.length === 0) return { found, skipped: `Checked ${found.length} real listings; none prove they match your rules yet. Still watching.` };
+  const run = await runAgent(mandateId, { mode: "careful", productIds: fits, baseUrl, quiet: true });
+  return { found, ...run };
+}
+
+/** Store page: import real products for a free-text search. */
+export async function importRealProducts(query: string, maxPrice?: number): Promise<store.Product[]> {
+  if (!channel3.channel3Enabled()) throw new UserError("Real-store search is off (CHANNEL3_API_KEY not set).");
+  if (!query.trim()) throw new UserError("Type what to search for.");
+  try {
+    const raw = await channel3.searchRaw({ query, maxPrice, limit: 6 });
+    return store.importProducts(raw.map((r) => channel3.toProduct(r)).filter((p): p is store.Product => !!p));
+  } catch (e) {
+    throw new UserError(`Real-store search failed: ${(e as Error).message}`);
+  }
 }
 
 /** One-tap approval for a first purchase from a new merchant. */
@@ -167,17 +249,23 @@ export async function approvePurchase(purchaseId: string): Promise<Purchase> {
   const purchase = purchaseOf(purchaseId);
   if (purchase.status !== "needs_approval") throw new UserError("This purchase is not waiting for approval.");
   if (!s.knownMerchants.includes(purchase.order.merchantId)) s.knownMerchants.push(purchase.order.merchantId);
-  // Re-check everything (balance, kill switch, limits) at approval time.
-  const decision = checkOrder(mandateOf(purchase.mandateId), purchase.order, pocketOf(purchase.pocketId), guardState());
-  purchase.decision = decision;
-  recorder.append(purchase.id, "guard_decision", { ...decision, approvedByUser: true });
-  if (decision.outcome !== "allow") {
+  // Re-check every hard rule (balance, kill switch, limits) at approval time. Soft "ask me" rules
+  // are what the user just answered, so ask_user counts as allowed here.
+  const signed = mandateOf(purchase.mandateId);
+  const pocket = pocketOf(purchase.pocketId);
+  const decision = checkOrder(signed, purchase.order, pocket, guardState(pocket));
+  purchase.decision = decision.outcome === "ask_user" ? { ...decision, outcome: "allow", violations: [] } : decision;
+  recorder.append(purchase.id, "guard_decision", { ...purchase.decision, approvedByUser: true });
+  if (purchase.decision.outcome !== "allow") {
     purchase.status = "blocked";
+    notifyPurchase(purchase, signed.mandate);
     saveState();
     return purchase;
   }
   purchase.status = "completed";
   await executePurchase(purchase);
+  notifyPurchase(purchase, signed.mandate);
+  saveState();
   return purchase;
 }
 
@@ -198,6 +286,9 @@ async function executePurchase(purchase: Purchase): Promise<void> {
     recorder.append(purchase.id, "paypal_capture", { captureId, amount: purchase.total });
     pocketOf(purchase.pocketId).balance = round2(pocketOf(purchase.pocketId).balance - purchase.total);
     purchase.why = await agents.whyLine(mandateOf(purchase.mandateId).mandate, purchase.order);
+    // A one-time exception is used up by this purchase.
+    const ex = exceptionOf(purchase.pocketId);
+    if (ex?.scope === "once" && ex.tempMandateId === purchase.mandateId) endException(purchase.pocketId, "used for this purchase");
   } catch (e) {
     purchase.status = "failed";
     purchase.error = ppErr(e);

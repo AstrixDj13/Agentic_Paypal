@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 
 /* ------------------------------------ Money ------------------------------------ */
@@ -28,7 +28,7 @@ export function Switch({ on, onChange, label, tone = "ok" }: { on: boolean; onCh
 
 export function Segmented<T extends string>({ value, options, onChange }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
   return (
-    <div className="segmented glass" role="tablist">
+    <div className="segmented" role="tablist">
       {options.map((o) => (
         <button key={o.value} role="tab" aria-selected={value === o.value} className={value === o.value ? "on" : ""} onClick={() => onChange(o.value)}>
           {o.label}
@@ -41,7 +41,7 @@ export function Segmented<T extends string>({ value, options, onChange }: { valu
 /* ------------------------------------ Bottom sheet ------------------------------------ */
 
 /** Bottom sheet: tap the scrim, press Escape, or drag the handle down to dismiss. */
-export function Sheet({ onClose, children, tone }: { onClose: () => void; children: ReactNode; tone?: "dark" }) {
+export function Sheet({ onClose, children }: { onClose: () => void; children: ReactNode }) {
   const [drag, setDrag] = useState(0);
   const start = useRef<number | null>(null);
 
@@ -58,7 +58,7 @@ export function Sheet({ onClose, children, tone }: { onClose: () => void; childr
   return (
     <div className="sheet-scrim" onClick={onClose}>
       <div
-        className={`sheet ${tone === "dark" ? "sheet-dark" : ""}`}
+        className="sheet"
         role="dialog"
         aria-modal="true"
         style={drag ? { transform: `translateY(${drag}px)`, transition: "none" } : undefined}
@@ -76,62 +76,13 @@ export function Sheet({ onClose, children, tone }: { onClose: () => void; childr
 
 /* ------------------------------------ Toast ------------------------------------ */
 
-export function Toast({ toast }: { toast: { text: string; error?: boolean } | null }) {
+export function Toast({ toast }: { toast: { text: string; error?: boolean; action?: { label: string; run: () => void } } | null }) {
   if (!toast) return null;
   return (
     <div className={`toast glass ${toast.error ? "error" : ""}`} role="status">
       <Icon name={toast.error ? "alert" : "check"} size={18} />
       <span>{toast.text}</span>
+      {toast.action && <button className="toast-action" onClick={toast.action.run}>{toast.action.label}</button>}
     </div>
   );
-}
-
-/* ------------------------------------ 3D objects ------------------------------------ */
-
-/**
- * Soft clay 3D objects for emotion moments only (empty states, success, verdicts).
- * CSS stand-ins until the rendered WebP assets exist; swap the markup for <img> later.
- */
-export function Obj({ kind, size = 1 }: { kind: "pocket" | "shield" | "box" | "coin"; size?: number }) {
-  return (
-    <div className={`obj obj-${kind}`} style={{ "--s": size } as React.CSSProperties} aria-hidden="true">
-      {kind === "box" && <i />}
-    </div>
-  );
-}
-
-/* ------------------------------------ Theme ------------------------------------ */
-
-type Theme = "system" | "light" | "dark";
-const KEY = "pocket.theme";
-
-function readTheme(): Theme {
-  try {
-    const v = localStorage.getItem(KEY);
-    return v === "light" || v === "dark" ? v : "system";
-  } catch {
-    return "system";
-  }
-}
-
-function applyTheme(t: Theme) {
-  const root = document.documentElement;
-  if (t === "system") root.removeAttribute("data-theme");
-  else root.setAttribute("data-theme", t);
-}
-
-/** Follows the system by default; the toggle flips to the opposite of what is showing now. */
-export function useTheme() {
-  const [theme, setTheme] = useState<Theme>(readTheme);
-  useEffect(() => applyTheme(theme), [theme]);
-  const isDark = useCallback(() => {
-    if (theme !== "system") return theme === "dark";
-    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
-  }, [theme]);
-  const toggle = useCallback(() => {
-    const next: Theme = isDark() ? "light" : "dark";
-    try { localStorage.setItem(KEY, next); } catch { /* storage blocked: still switch for this session */ }
-    setTheme(next);
-  }, [isDark]);
-  return { dark: isDark(), toggle };
 }
