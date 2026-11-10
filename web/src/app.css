@@ -1361,3 +1361,42 @@ html.app-locked, html.app-locked body { overflow: hidden; overscroll-behavior: n
 .set-ico { width: 24px; height: 30px; border-radius: 0; background: none; color: var(--text-muted); }
 .set-row + .set-row::before { left: 50px; }
 .bb-entry-ico { background: var(--surface-2); color: var(--text-muted); }
+
+/* ------------------------------------ Home: agents status, pause, an honest month ------------------------------------ */
+/* At rest: one quiet line under the balance. */
+.agents-status { display: inline-flex; align-items: center; gap: 6px; height: 26px; margin-left: -8px; padding: 0 8px; border: 0; border-radius: 13px;
+  background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.agents-status:active { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.agents-status svg { opacity: 0.6; }
+.status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
+.agents-status.is-paused { color: var(--warn); font-weight: 600; }
+.agents-status.is-paused .status-dot { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 25%, transparent); }
+
+/* While paused: the state takes over. A calm amber banner, and every card loses its colour. */
+.paused-banner { display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 14px; border-radius: 18px;
+  background: color-mix(in srgb, var(--warn) 14%, var(--surface)); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  animation: na-in 0.36s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.paused-banner .footnote { color: var(--text-muted); }
+.paused-ico { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--warn); color: #fff; }
+.paused-banner .btn { flex: none; }
+.agents-top + .paused-banner { margin-top: 4px; }
+.agent-face, .peek-card { transition: filter 0.5s ease; }
+.device.paused .agent-face, .device.paused .peek-card { filter: saturate(0.12) brightness(0.92); }
+
+/* The pause control */
+.pause-head { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; padding-top: 4px; }
+.pause-glyph { width: 60px; height: 60px; border-radius: 50%; display: grid; place-items: center; color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.pause-glyph.is-paused { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+
+/* This month: one headline number, one bar, one line of context */
+.spend-card { gap: 6px; }
+.month-hero { display: flex; align-items: baseline; gap: 8px; }
+.month-label { font-size: var(--text-md); font-weight: 600; }
+.month-bar { display: block; height: 6px; margin-top: 8px; border-radius: 3px; overflow: hidden; background: color-mix(in srgb, var(--text-muted) 22%, transparent); }
+.month-bar i { display: block; height: 100%; border-radius: inherit; background: var(--brand-blue); transform-origin: left center; transition: transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.month-meta { display: flex; justify-content: space-between; gap: 12px; font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+
+/* Nothing wrong yet: one calm line instead of two zero tiles */
+.trust-line { display: flex; align-items: center; gap: 10px; width: 100%; padding: 14px 16px; text-align: left; font: inherit; font-size: var(--text-sm); color: inherit; cursor: pointer; }
+.trust-line:active { transform: scale(0.99); }
+.tile.hero-glass { border-radius: var(--radius-lg); }

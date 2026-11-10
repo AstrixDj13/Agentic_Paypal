@@ -13,11 +13,13 @@ import { BlackBox, EvidenceSheet } from "./Console";
 import AgentPage, { AgentDetails } from "./AgentPage";
 import { SPRING, reducedMotion, launch, land, flyFrom } from "../motion";
 import { usePullToRefresh, useUpdateCheck, useViewportGuard } from "../standalone";
-import { AgentCardFace, AgentIcon, BudgetBar, activeMandate, budgetOf, cardStats, pendingFor, toneOf, unreadFor } from "../components/agent";
+import { AgentCardFace, AgentIcon, BudgetBar, activeMandate, amount, budgetOf, cardStats, pendingFor, toneOf, unreadFor } from "../components/agent";
 import { AgentMenu, CloseAgent, DeleteAgent, JobSheet, MoveMoney, NewAgent, RenameAgent } from "../components/agentSheets";
 import { LockScreen, SignButton, SignerProvider } from "../components/lock";
 import { AccountScreen } from "../components/account";
 import { AccountButton, AccountSheet } from "../components/accountSheet";
+import { AgentsStatus, PauseSheet, PausedBanner, type SetKill } from "../components/pause";
+import type { Signature } from "../components/lock";
 
 const UNLOCK_KEY = "pocket.unlocked";
 const readUnlocked = () => { try { return sessionStorage.getItem(UNLOCK_KEY) === "1"; } catch { return false; } };
@@ -37,6 +39,7 @@ export type SheetState =
   | { kind: "wrong"; id: string }
   | { kind: "evidence"; id: string }
   | { kind: "account" }
+  | { kind: "pause" }
   | { kind: "found"; id: string; result: FindResult }
   | null;
 
@@ -224,18 +227,20 @@ export default function PocketApp() {
     }
   };
 
-  // Pause or resume every agent. Always undoable from the toast.
-  const setKill = async (on: boolean) => {
+  // Pause is instant (it only makes things safer). Resume gives spending power back, so callers pass a signature
+  // (PIN / fingerprint / Face ID). Re-pausing right after a resume is offered from the toast.
+  const setKill: SetKill = async (on: boolean, auth?: Signature) => {
     try {
-      await api("/api/killswitch", { on });
-      show(on ? "All agents paused. Nothing will be bought." : "Agents resumed.", false, { label: "Undo", run: () => setKill(!on) });
+      await api("/api/killswitch", auth ? { on, auth } : { on });
+      navigator.vibrate?.(on ? [18, 40, 18] : 12);
+      if (on) show("All agents paused. Nothing will be bought.");
+      else show("Agents resumed.", false, { label: "Pause again", run: () => setKill(true) });
     } catch (e) {
       show((e as Error).message, true);
     } finally {
       refresh();
     }
   };
-  const toggleKill = () => state && setKill(!state.killSwitch);
 
   const openEvidence = (id: string) => { setSheet({ kind: "evidence", id }); navigate("/console"); };
 
@@ -286,7 +291,7 @@ export default function PocketApp() {
           ) : (
             <>
               {/* Home stays mounted under the Agents layer, so going back is instant and the slide can reveal it. */}
-              {(tab === "home" || tab === "agents") && <Home state={state} act={act} setSheet={setSheet} toggleKill={toggleKill} goActivity={(f) => navigate(f ? `/activity?f=${f}` : "/activity")} openAgent={openAgent} goAgents={goAgents} goBlackBox={() => navigate("/console")} makeAgent={makeAgent} openKnows={() => navigate("/knows")} snap={snap.open} accountEmail={account.mode === "accounts" ? account.email : null} openAccount={() => setSheet({ kind: "account" })} />}
+              {(tab === "home" || tab === "agents") && <Home state={state} act={act} setSheet={setSheet} setKill={setKill} goActivity={(f) => navigate(f ? `/activity?f=${f}` : "/activity")} openAgent={openAgent} goAgents={goAgents} goBlackBox={() => navigate("/console")} makeAgent={makeAgent} openKnows={() => navigate("/knows")} snap={snap.open} accountEmail={account.mode === "accounts" ? account.email : null} openAccount={() => setSheet({ kind: "account" })} />}
               {tab === "knows" && <KnowsPage back={() => navigate("/")} onUse={makeAgent} onSnap={snap.open} show={show} />}
               {tab === "share" && <SharePage onResult={onShared} show={show} done={shareDone} />}
               {tab === "agent" && <AgentPage state={state} agentId={agentId} act={act} refresh={refresh} show={show} setSheet={setSheet} back={() => navigate("/agents")} />}
@@ -307,7 +312,7 @@ export default function PocketApp() {
         {tab === "agents" && state && (
           <AgentsLayer under={mainRef} animateIn={!!(locState as { push?: boolean } | null)?.push} onBack={() => navigate("/")}
             onScroll={(e) => { const sc = e.currentTarget.scrollTop > 56; if (sc !== scrolled) setScrolled(sc); }}>
-            {(goBack) => <AgentsTab state={state} setSheet={setSheet} openAgent={openAgent} show={show} refresh={refresh} back={goBack} />}
+            {(goBack) => <AgentsTab state={state} setSheet={setSheet} openAgent={openAgent} show={show} refresh={refresh} back={goBack} setKill={setKill} />}
           </AgentsLayer>
         )}
 
@@ -337,7 +342,8 @@ export default function PocketApp() {
             {sheet.kind === "purchase" && <PurchaseDetail state={state} id={sheet.id} act={act} setSheet={setSheet} openEvidence={openEvidence} />}
             {sheet.kind === "wrong" && <ReportWrong state={state} id={sheet.id} refresh={refresh} show={show} setSheet={setSheet} />}
             {sheet.kind === "evidence" && <EvidenceSheet state={state} id={sheet.id} />}
-            {sheet.kind === "account" && <AccountSheet state={state} email={account.mode === "accounts" ? account.email : null} signedIn={account.mode === "accounts" && !!account.email} act={act} toggleKill={toggleKill} go={(path) => { close(); navigate(path); }} show={show} />}
+            {sheet.kind === "pause" && <PauseSheet state={state} setKill={setKill} close={close} />}
+            {sheet.kind === "account" && <AccountSheet state={state} email={account.mode === "accounts" ? account.email : null} signedIn={account.mode === "accounts" && !!account.email} act={act} setKill={setKill} go={(path) => { close(); navigate(path); }} show={show} />}
             {sheet.kind === "found" && <FoundSheet state={state} result={sheet.result} setSheet={setSheet} />}
           </Sheet>
         )}
@@ -351,8 +357,8 @@ export default function PocketApp() {
 
 /* ====================================== Home ====================================== */
 
-function Home({ state, act, setSheet, toggleKill, goActivity, openAgent, goAgents, goBlackBox, makeAgent, openKnows, snap, accountEmail, openAccount }: {
-  state: AppState; act: Act; setSheet: (s: SheetState) => void; toggleKill: () => void; goActivity: (filter?: string) => void;
+function Home({ state, act, setSheet, setKill, goActivity, openAgent, goAgents, goBlackBox, makeAgent, openKnows, snap, accountEmail, openAccount }: {
+  state: AppState; act: Act; setSheet: (s: SheetState) => void; setKill: SetKill; goActivity: (filter?: string) => void;
   openAgent: (id: string) => void; goAgents: () => void; goBlackBox: () => void;
   makeAgent: (p: AgentPrefill) => void; openKnows: () => void; snap: () => void;
   accountEmail?: string | null; openAccount: () => void;
@@ -376,6 +382,8 @@ function Home({ state, act, setSheet, toggleKill, goActivity, openAgent, goAgent
     .reduce((s, p) => s + p.total, 0);
   // Trust tiles: proof the rules work, and proof you're covered.
   const stopped = state.purchases.filter((p) => p.status === "blocked").length;
+  const budgetAll = spentMonth + total;
+  const hasWeekly = state.mandates.some((m) => m.mandate.kind === "routine" && open.some((a) => a.id === m.mandate.pocketId));
   const moneyBack = state.purchases.reduce((s, p) => {
     const r = p.dispute?.resolution;
     return s + (r && (r.type === "refund" || r.type === "payout") ? r.amount ?? 0 : 0);
@@ -394,7 +402,7 @@ function Home({ state, act, setSheet, toggleKill, goActivity, openAgent, goAgent
           <p className="subhead muted">Total in your pockets</p>
           <Money value={total} />
           <p className="footnote muted balance-meta">
-            {open.length ? `Across ${open.length} agent${open.length === 1 ? "" : "s"}` : "No agents yet"}
+            {open.length ? <AgentsStatus state={state} onOpen={() => setSheet({ kind: "pause" })} /> : "No agents yet"}
             {state.vault && <span className="row" style={{ gap: 4 }}><Icon name="check" size={13} stroke={2.4} className="ok-text" />PayPal connected</span>}
           </p>
           {open.length === 0 && (
@@ -418,18 +426,8 @@ function Home({ state, act, setSheet, toggleKill, goActivity, openAgent, goAgent
         </div>
       </section>
 
-      {open.length > 0 && (
-        <div className={`card pause-card hero-glass ${paused ? "is-paused" : ""}`}>
-          <span className="grow stack-xs">
-            <span className="footnote muted">Your agents</span>
-            <strong className="headline">{paused ? "All paused" : "All active"}</strong>
-            <span className={`caption ${paused ? "danger-text" : "muted"}`}>{paused ? "Nothing will be bought" : `${open.length} can buy within their rules`}</span>
-          </span>
-          <button className={`btn sm ${paused ? "primary" : "caution"}`} onClick={toggleKill}>
-            <Icon name={paused ? "play" : "pause"} size={16} />{paused ? "Resume all" : "Pause all"}
-          </button>
-        </div>
-      )}
+      {/* Quiet while all is well (the status line above); loud only while paused. */}
+      {paused && open.length > 0 && <PausedBanner setKill={setKill} />}
 
       {toApprove > 0 && (
         <button className="card action-row hero-glass" onClick={() => goActivity("needs")}>
@@ -465,46 +463,50 @@ function Home({ state, act, setSheet, toggleKill, goActivity, openAgent, goAgent
           <button className="btn gold block" onClick={connect}>Connect PayPal</button>
         </div>
       ) : open.length > 0 && (
-        <button className="card spend-card" onClick={() => goActivity()} aria-label={`${savedMonth !== undefined ? `Saved this month: ${money(savedMonth)}. ` : ""}This month: ${money(spentMonth)} spent. ${money(total)} still allowed across your agents. Open Activity.`}>
-          {/* Savings lead: they're the reason to come back. Only real savings (against what you usually pay) are shown. */}
+        /* One truthful story: savings lead only when they're real; otherwise what was spent and what's left.
+           Savings are only promised where they can happen (a weekly shop measures against your usual prices). */
+        <button className="card spend-card hero-glass" onClick={() => goActivity()}
+          aria-label={`This month: ${savedMonth !== undefined ? `saved ${money(savedMonth)}, ` : ""}${money(spentMonth)} spent, ${money(total)} left to spend. Open Activity.`}>
+          <span className="footnote muted">This month</span>
           {savedMonth !== undefined ? (
-            <span className="row between" style={{ alignItems: "flex-end" }}>
-              <span className="stack-xs">
-                <span className="footnote muted">Saved this month</span>
-                <span className="row" style={{ gap: 8, alignItems: "baseline" }}><Money value={savedMonth} size="title" className="ok-text" /></span>
-                <span className="caption muted">Against what you usually pay</span>
-              </span>
-              <span className="stack-xs" style={{ alignItems: "flex-end" }}>
-                <span className="footnote muted">{money(spentMonth)} spent</span>
-                <span className="caption muted">{money(total)} still allowed</span>
-              </span>
+            <span className="month-hero">
+              <span className="month-label ok-text">Saved</span>
+              <Money value={savedMonth} size="title" className="ok-text" />
             </span>
           ) : (
-            <span className="row between" style={{ alignItems: "flex-end" }}>
-              <span className="stack-xs">
-                <span className="footnote muted">This month</span>
-                <span className="row" style={{ gap: 8, alignItems: "baseline" }}><Money value={spentMonth} size="title" /><span className="footnote muted">spent</span></span>
-                <span className="caption muted">Savings appear after your first week</span>
-              </span>
-              <span className="footnote muted">{money(total)} still allowed</span>
+            <span className="month-hero">
+              <Money value={spentMonth} size="title" />
+              <span className="month-label muted">spent</span>
             </span>
           )}
-          <BudgetBar left={spentMonth} total={spentMonth + total} label={`${money(spentMonth)} spent of ${money(spentMonth + total)}`} />
+          <span className="month-bar" aria-hidden="true"><i style={{ transform: `scaleX(${budgetAll > 0 ? Math.min(1, spentMonth / budgetAll) : 0})` }} /></span>
+          <span className="month-meta">
+            <span>{savedMonth !== undefined ? `${amount(spentMonth)} spent` : `${amount(total)} left to spend`}</span>
+            <span className="muted">{savedMonth !== undefined ? `${amount(total)} left` : `of ${amount(budgetAll)}`}</span>
+          </span>
+          {savedMonth === undefined && hasWeekly && <span className="caption muted">Your weekly shop shows savings after its first order.</span>}
         </button>
       )}
 
-      {(open.length > 0 || state.purchases.length > 0) && (
+      {(open.length > 0 || state.purchases.length > 0) && (stopped === 0 && moneyBack === 0 ? (
+        /* Nothing has gone wrong yet: say so in one calm line instead of two zero tiles. */
+        <button className="card trust-line hero-glass" onClick={goBlackBox} aria-label="Nothing risky got through and no disputes. Open Black Box.">
+          <Icon name="shield" size={18} className="ok-text" />
+          <span className="grow">Nothing risky got through · No disputes</span>
+          <Icon name="chevronRight" size={16} className="muted" />
+        </button>
+      ) : (
         <div className="tiles">
-          <button className="tile tile-btn" onClick={goBlackBox} aria-label={`Stopped by your rules: ${stopped}. Open Black Box.`}>
-            <span className="caption muted row" style={{ gap: 6 }}><Icon name="shield" size={14} />Stopped by your rules</span>
+          <button className="tile tile-btn hero-glass" onClick={goBlackBox} aria-label={`Stopped by your rules: ${stopped}. Open Black Box.`}>
+            <span className="caption muted row" style={{ gap: 6 }}><Icon name="shield" size={14} />Stopped by rules</span>
             <span className="tile-v num">{stopped}</span>
           </button>
-          <button className="tile tile-btn" onClick={goBlackBox} aria-label={`Money back: ${money(moneyBack)}. Open Black Box.`}>
+          <button className="tile tile-btn hero-glass" onClick={goBlackBox} aria-label={`Money back: ${money(moneyBack)}. Open Black Box.`}>
             <span className="caption muted row" style={{ gap: 6 }}><Icon name="undo" size={14} />Money back</span>
-            <span className="tile-v num ok-text">{money(moneyBack)}</span>
+            <span className={`tile-v num ${moneyBack > 0 ? "ok-text" : ""}`}>{money(moneyBack)}</span>
           </button>
         </div>
-      )}
+      ))}
 
       <NoticedCard onUse={makeAgent} onOpenKnows={openKnows} onSnap={snap} />
 
@@ -515,11 +517,12 @@ function Home({ state, act, setSheet, toggleKill, goActivity, openAgent, goAgent
 
 /* ====================================== Agents (the wallet) ====================================== */
 
-function AgentsTab({ state, setSheet, openAgent, show, refresh, back }: {
+function AgentsTab({ state, setSheet, openAgent, show, refresh, back, setKill }: {
   state: AppState; setSheet: (s: SheetState) => void; openAgent: (id: string, view?: "chat") => void;
   show: (t: string, e?: boolean, action?: { label: string; run: () => void }) => void; refresh: () => Promise<void> | void;
   /** Slides the Agents layer away, back to Home. */
   back: () => void;
+  setKill: SetKill;
 }) {
   const open = state.pockets.filter((p) => !p.closedAt);
   const closed = state.pockets.filter((p) => p.closedAt);
@@ -564,6 +567,7 @@ function AgentsTab({ state, setSheet, openAgent, show, refresh, back }: {
         <h1 className="agents-title">Agents</h1>
         <button className="glass-circle new-agent-btn" onClick={() => setSheet({ kind: "agent" })} aria-label="New agent"><Icon name="plus" size={22} /></button>
       </div>
+      {state.killSwitch && open.length > 0 && <PausedBanner setKill={setKill} />}
       {open.length > 6 && <input className="input search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search agents" aria-label="Search agents" />}
 
       {open.length === 0 ? (

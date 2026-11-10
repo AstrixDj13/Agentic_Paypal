@@ -3,6 +3,7 @@ import { api, type AppState } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { Mark } from "./Brand";
 import { deviceUnlock, type AuthStatus } from "./lock";
+import { useResumeAll, type SetKill } from "./pause";
 import { signOut } from "./account";
 import { disablePush, enablePush, pushState } from "../push";
 import { Switch } from "./ui";
@@ -47,9 +48,9 @@ function Row({ icon, title, detail, onClick, trailing }: {
   return onClick ? <button type="button" className="set-row" onClick={onClick}>{body}</button> : <div className="set-row">{body}</div>;
 }
 
-export function AccountSheet({ state, email, signedIn, act, toggleKill, go, show }: {
+export function AccountSheet({ state, email, signedIn, act, setKill, go, show }: {
   state: AppState; email?: string | null; signedIn: boolean;
-  act: (fn: () => Promise<unknown>, ok?: string) => unknown; toggleKill: () => void;
+  act: (fn: () => Promise<unknown>, ok?: string) => unknown; setKill: SetKill;
   go: (path: string) => void; show: (t: string, e?: boolean) => void;
 }) {
   const [auth, setAuth] = useState<AuthStatus | null>(null);
@@ -62,6 +63,7 @@ export function AccountSheet({ state, email, signedIn, act, toggleKill, go, show
 
   const ini = initialsOf(email);
   const unlock = deviceUnlock();
+  const resume = useResumeAll(setKill); // resuming gives spending power back: it asks for your PIN
   const open = state.pockets.filter((p) => !p.closedAt).length;
   const records = state.purchases.length;
   const connect = () => act(async () => {
@@ -91,7 +93,7 @@ export function AccountSheet({ state, email, signedIn, act, toggleKill, go, show
       <section className="set-group" aria-label="Spending">
         <Row icon={state.killSwitch ? "play" : "pause"} title="Pause all agents"
           detail={state.killSwitch ? "Nothing will be bought until you resume." : `${open} agent${open === 1 ? "" : "s"} can buy within their rules.`}
-          trailing={<Switch on={!!state.killSwitch} onChange={toggleKill} label="Pause all agents" tone="danger" />} />
+          trailing={<Switch on={!!state.killSwitch} onChange={() => (state.killSwitch ? resume() : setKill(true))} label="Pause all agents" tone="danger" />} />
       </section>
 
       <section className="set-group" aria-label="Security">
