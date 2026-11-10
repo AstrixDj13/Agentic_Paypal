@@ -15,7 +15,8 @@ import { SPRING, reducedMotion, launch, land, flyFrom } from "../motion";
 import { AgentCardFace, AgentIcon, BudgetBar, activeMandate, budgetOf, cardStats, pendingFor, toneOf, unreadFor } from "../components/agent";
 import { AgentMenu, CloseAgent, DeleteAgent, JobSheet, MoveMoney, NewAgent, RenameAgent } from "../components/agentSheets";
 import { LockScreen, SignButton, SignerProvider } from "../components/lock";
-import { AccountScreen, signOut } from "../components/account";
+import { AccountScreen } from "../components/account";
+import { AccountButton, AccountSheet } from "../components/accountSheet";
 
 const UNLOCK_KEY = "pocket.unlocked";
 const readUnlocked = () => { try { return sessionStorage.getItem(UNLOCK_KEY) === "1"; } catch { return false; } };
@@ -34,6 +35,7 @@ export type SheetState =
   | { kind: "purchase"; id: string }
   | { kind: "wrong"; id: string }
   | { kind: "evidence"; id: string }
+  | { kind: "account" }
   | { kind: "found"; id: string; result: FindResult }
   | null;
 
@@ -41,7 +43,6 @@ const TABS: { tab: Tab; path: string; label: string; icon: IconName }[] = [
   { tab: "home", path: "/", label: "Home", icon: "home" },
   { tab: "agents", path: "/agents", label: "Agents", icon: "wallet" },
   { tab: "activity", path: "/activity", label: "Activity", icon: "activity" },
-  { tab: "blackbox", path: "/console", label: "Black Box", icon: "box" },
 ];
 
 const TAB_TITLE: Record<Tab, string> = { home: "Pocket", agents: "Agents", agent: "", activity: "Activity", blackbox: "Black Box", knows: "What Pocket knows", share: "Pocket" };
@@ -150,6 +151,8 @@ export default function PocketApp() {
   const { pathname, search, state: locState } = useLocation();
   const navigate = useNavigate();
   const tab = tabFromPath(pathname);
+  // Black Box opens from Activity (and your account), so Activity stays lit while you are in it.
+  const navTab: Tab = tab === "blackbox" ? "activity" : tab === "knows" ? "home" : tab;
   const agentId = tab === "agent" ? decodeURIComponent(pathname.split("/")[2] ?? "") : "";
   const openAgent = (id: string, view?: "chat") => navigate(`/agents/${id}${view ? `?view=${view}` : ""}`);
   // Home → Agents: the Agents screen is pushed over Home (see AgentsLayer).
@@ -271,12 +274,20 @@ export default function PocketApp() {
           ) : (
             <>
               {/* Home stays mounted under the Agents layer, so going back is instant and the slide can reveal it. */}
-              {(tab === "home" || tab === "agents") && <Home state={state} act={act} setSheet={setSheet} toggleKill={toggleKill} goActivity={(f) => navigate(f ? `/activity?f=${f}` : "/activity")} openAgent={openAgent} goAgents={goAgents} goBlackBox={() => navigate("/console")} makeAgent={makeAgent} openKnows={() => navigate("/knows")} snap={snap.open} accountEmail={account.mode === "accounts" ? account.email : null} />}
+              {(tab === "home" || tab === "agents") && <Home state={state} act={act} setSheet={setSheet} toggleKill={toggleKill} goActivity={(f) => navigate(f ? `/activity?f=${f}` : "/activity")} openAgent={openAgent} goAgents={goAgents} goBlackBox={() => navigate("/console")} makeAgent={makeAgent} openKnows={() => navigate("/knows")} snap={snap.open} accountEmail={account.mode === "accounts" ? account.email : null} openAccount={() => setSheet({ kind: "account" })} />}
               {tab === "knows" && <KnowsPage back={() => navigate("/")} onUse={makeAgent} onSnap={snap.open} show={show} />}
               {tab === "share" && <SharePage onResult={onShared} show={show} done={shareDone} />}
               {tab === "agent" && <AgentPage state={state} agentId={agentId} act={act} refresh={refresh} show={show} setSheet={setSheet} back={() => navigate("/agents")} />}
-              {tab === "activity" && <Activity key={search} initial={(new URLSearchParams(search).get("f") as Filter) ?? "all"} state={state} setSheet={setSheet} />}
-              {tab === "blackbox" && <BlackBox state={state} show={show} openEvidence={(id) => setSheet({ kind: "evidence", id })} />}
+              {tab === "activity" && <Activity key={search} initial={(new URLSearchParams(search).get("f") as Filter) ?? "all"} state={state} setSheet={setSheet} openBlackBox={() => navigate("/console")} />}
+              {tab === "blackbox" && (
+                <>
+                  {/* Black Box is a page you open (from Activity or your account), not a tab: Back returns you to where you were. */}
+                  <div className="page-back">
+                    <button className="glass-circle" aria-label="Back" onClick={() => ((window.history.state as { idx?: number } | null)?.idx ? navigate(-1) : navigate("/activity"))}><Icon name="chevronLeft" size={22} /></button>
+                  </div>
+                  <BlackBox state={state} show={show} openEvidence={(id) => setSheet({ kind: "evidence", id })} />
+                </>
+              )}
             </>
           )}
         </main>
@@ -290,7 +301,7 @@ export default function PocketApp() {
 
         {tab !== "agent" && <nav className="tabbar glass" aria-label="Main" style={{ gridTemplateColumns: `repeat(${TABS.length}, 1fr)` }}>
           {TABS.map((t) => (
-            <button key={t.tab} className={tab === t.tab ? "on" : ""} aria-current={tab === t.tab ? "page" : undefined} onClick={() => (t.tab === "agents" ? goAgents() : navigate(t.path))}>
+            <button key={t.tab} className={navTab === t.tab ? "on" : ""} aria-current={navTab === t.tab ? "page" : undefined} onClick={() => (t.tab === "agents" ? goAgents() : navigate(t.path))}>
               <span className="tab-ico">
                 <Icon name={t.icon} size={22} />
                 {t.tab === "activity" && pending > 0 && <span className="dot-badge">{pending}</span>}
@@ -314,6 +325,7 @@ export default function PocketApp() {
             {sheet.kind === "purchase" && <PurchaseDetail state={state} id={sheet.id} act={act} setSheet={setSheet} openEvidence={openEvidence} />}
             {sheet.kind === "wrong" && <ReportWrong state={state} id={sheet.id} refresh={refresh} show={show} setSheet={setSheet} />}
             {sheet.kind === "evidence" && <EvidenceSheet state={state} id={sheet.id} />}
+            {sheet.kind === "account" && <AccountSheet state={state} email={account.mode === "accounts" ? account.email : null} signedIn={account.mode === "accounts" && !!account.email} act={act} toggleKill={toggleKill} go={(path) => { close(); navigate(path); }} show={show} />}
             {sheet.kind === "found" && <FoundSheet state={state} result={sheet.result} setSheet={setSheet} />}
           </Sheet>
         )}
@@ -327,11 +339,11 @@ export default function PocketApp() {
 
 /* ====================================== Home ====================================== */
 
-function Home({ state, act, setSheet, toggleKill, goActivity, openAgent, goAgents, goBlackBox, makeAgent, openKnows, snap, accountEmail }: {
+function Home({ state, act, setSheet, toggleKill, goActivity, openAgent, goAgents, goBlackBox, makeAgent, openKnows, snap, accountEmail, openAccount }: {
   state: AppState; act: Act; setSheet: (s: SheetState) => void; toggleKill: () => void; goActivity: (filter?: string) => void;
   openAgent: (id: string) => void; goAgents: () => void; goBlackBox: () => void;
   makeAgent: (p: AgentPrefill) => void; openKnows: () => void; snap: () => void;
-  accountEmail?: string | null;
+  accountEmail?: string | null; openAccount: () => void;
 }) {
   const looks = state.purchases.filter((p) => p.status === "awaiting_look");
   const open = state.pockets.filter((p) => !p.closedAt);
@@ -361,7 +373,10 @@ function Home({ state, act, setSheet, toggleKill, goActivity, openAgent, goAgent
     <>
       <section className="hero wallet">
         <span className="hero-watermark" aria-hidden="true"><Mark size={280} /></span>
-        <BrandLockup height={46} />
+        <div className="hero-top">
+          <BrandLockup height={46} />
+          <AccountButton email={accountEmail} onOpen={openAccount} />
+        </div>
         {/* No card around the balance: it sits on the brand wash, with the agents' cards peeking in from the right. */}
         <div className={`balance ${paused ? "is-paused" : ""}`}>
           <p className="subhead muted">Total in your pockets</p>
@@ -482,11 +497,6 @@ function Home({ state, act, setSheet, toggleKill, goActivity, openAgent, goAgent
       <NoticedCard onUse={makeAgent} onOpenKnows={openKnows} onSnap={snap} />
 
       <p className="trust-note"><Icon name="shield" size={16} />Agents can only spend what's in their own pocket. Your PayPal balance and cards are never shared with them.</p>
-      {accountEmail && (
-        <p className="account-note caption muted">
-          Signed in as {accountEmail} · <button className="link-btn" onClick={signOut}>Sign out</button>
-        </p>
-      )}
     </>
   );
 }
@@ -610,7 +620,7 @@ function AgentsTab({ state, setSheet, openAgent, show, refresh, back }: {
 
 type Filter = "all" | "needs" | "blocked" | "disputes";
 
-function Activity({ state, setSheet, initial }: { state: AppState; setSheet: (s: SheetState) => void; initial: Filter }) {
+function Activity({ state, setSheet, initial, openBlackBox }: { state: AppState; setSheet: (s: SheetState) => void; initial: Filter; openBlackBox: () => void }) {
   const [filter, setFilter] = useState<Filter>(["all", "needs", "blocked", "disputes"].includes(initial) ? initial : "all");
   const counts = useMemo(() => ({
     needs: state.purchases.filter((p) => p.status === "needs_approval").length,
@@ -623,6 +633,15 @@ function Activity({ state, setSheet, initial }: { state: AppState; setSheet: (s:
     <>
       <div className="page-head"><h1 className="large-title">Activity</h1></div>
       <p className="subhead muted">Every purchase your agents made or tried to make.</p>
+      {/* The proof behind this list lives one tap away, not in its own tab. */}
+      <button className="card bb-entry" onClick={openBlackBox}>
+        <span className="bb-entry-ico" aria-hidden="true"><Icon name="box" size={20} /></span>
+        <span className="grow stack-xs">
+          <strong className="headline">Black Box</strong>
+          <span className="footnote muted">A tamper-proof record of every decision your agents made.</span>
+        </span>
+        <Icon name="chevronRight" size={18} className="muted" />
+      </button>
       <Segmented<Filter>
         value={filter}
         onChange={setFilter}
