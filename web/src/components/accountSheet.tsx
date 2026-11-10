@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type AppState } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { Mark } from "./Brand";
-import type { AuthStatus } from "./lock";
+import { deviceUnlock, type AuthStatus } from "./lock";
 import { signOut } from "./account";
 import { disablePush, enablePush, pushState } from "../push";
 import { Switch } from "./ui";
@@ -60,6 +60,7 @@ export function AccountSheet({ state, email, signedIn, act, toggleKill, go, show
   }, []);
 
   const ini = initialsOf(email);
+  const unlock = deviceUnlock();
   const open = state.pockets.filter((p) => !p.closedAt).length;
   const records = state.purchases.length;
   const connect = () => act(async () => {
@@ -95,7 +96,7 @@ export function AccountSheet({ state, email, signedIn, act, toggleKill, go, show
       <section className="set-group" aria-label="Security">
         <Row icon="lock" tint="#5e5ce6" title="PIN" detail={auth ? (auth.hasPin ? "Signs every payment and rule change" : "Not set up") : "…"}
           trailing={<span className="set-value">{auth?.hasPin ? "On" : "Off"}</span>} />
-        <Row icon="faceid" tint="#30b0c7" title="Face ID" detail="Use it instead of your PIN on this device"
+        <Row icon={unlock.icon} tint="#30b0c7" title={unlock.label} detail="A passkey on this device, instead of your PIN"
           trailing={<span className="set-value">{auth ? (auth.biometrics ? "On" : "Off") : "…"}</span>} />
       </section>
 

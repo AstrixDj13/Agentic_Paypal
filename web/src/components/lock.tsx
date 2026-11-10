@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { api } from "../api";
 import { Mark } from "./Brand";
-import { Icon } from "./Icon";
+import { Icon, type IconName } from "./Icon";
 import { Money } from "./ui";
 
 /**
@@ -12,6 +12,25 @@ import { Money } from "./ui";
 
 export type Signature = { pin: string } | { assertion: { id: string; clientDataJSON: string; authenticatorData: string; signature: string } };
 export interface AuthStatus { hasPin: boolean; biometrics: boolean; lockedUntil?: string }
+
+/* ------------------------------------ This device's unlock, by its own name ------------------------------------ */
+
+/**
+ * Signing uses passkeys (WebAuthn), which every platform unlocks its own way. Name it the way this device does, so
+ * an Android phone never sees "Face ID": iPhone -> Face ID, Mac -> Touch ID, Android -> Fingerprint,
+ * Windows -> Windows Hello, anything else -> Passkey. `label` for titles and buttons, `phrase` inside sentences.
+ */
+export function deviceUnlock(): { label: string; phrase: string; icon: IconName } {
+  const ua = navigator.userAgent;
+  const platform = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform || navigator.platform || "";
+  const touchMac = /Mac/i.test(platform) && navigator.maxTouchPoints > 1; // iPadOS reports itself as a Mac
+  if (/iPhone|iPod/.test(ua)) return { label: "Face ID", phrase: "Face ID", icon: "faceid" };
+  if (/iPad/.test(ua) || touchMac) return { label: "Face ID or Touch ID", phrase: "Face ID or Touch ID", icon: "faceid" };
+  if (/Android/i.test(ua)) return { label: "Fingerprint", phrase: "your fingerprint", icon: "fingerprint" };
+  if (/Mac/i.test(platform) || /Macintosh/.test(ua)) return { label: "Touch ID", phrase: "Touch ID", icon: "fingerprint" };
+  if (/Win/i.test(platform)) return { label: "Windows Hello", phrase: "Windows Hello", icon: "fingerprint" };
+  return { label: "Passkey", phrase: "a passkey", icon: "fingerprint" };
+}
 
 /* ------------------------------------ WebAuthn helpers ------------------------------------ */
 
@@ -29,7 +48,7 @@ export async function biometricsAvailable(): Promise<boolean> {
   }
 }
 
-/** Registers this device's Face ID / fingerprint. The PIN signs the registration. */
+/** Registers this device's passkey (Face ID, Touch ID, fingerprint, Windows Hello). The PIN signs the registration. */
 export async function enrollBiometrics(pin: string) {
   const { challenge } = await api<{ challenge: string }>("/api/auth/challenge", {});
   const cred = (await navigator.credentials.create({
@@ -43,7 +62,7 @@ export async function enrollBiometrics(pin: string) {
       timeout: 60_000,
     },
   })) as PublicKeyCredential | null;
-  if (!cred) throw new Error("Face ID / fingerprint setup was cancelled.");
+  if (!cred) throw new Error(`${deviceUnlock().label} setup was cancelled.`);
   const r = cred.response as AuthenticatorAttestationResponse;
   const pk = r.getPublicKey();
   if (!pk) throw new Error("This browser can't share the biometric key.");
@@ -62,7 +81,7 @@ export async function biometricSignature(): Promise<Signature> {
       timeout: 60_000,
     },
   })) as PublicKeyCredential | null;
-  if (!a) throw new Error("Face ID / fingerprint was cancelled.");
+  if (!a) throw new Error(`${deviceUnlock().label} was cancelled.`);
   const r = a.response as AuthenticatorAssertionResponse;
   return { assertion: { id: a.id, clientDataJSON: b64u(r.clientDataJSON), authenticatorData: b64u(r.authenticatorData), signature: b64u(r.signature) } };
 }
@@ -83,6 +102,7 @@ export function LockScreen({ mode, title, detail, onDone, onCancel }: {
   const [shake, setShake] = useState(false);
   const [busy, setBusy] = useState(false);
   const [offerBio, setOfferBio] = useState<string | null>(null); // PIN to sign the enrolment with
+  const unlock = deviceUnlock();
 
   useEffect(() => {
     api<AuthStatus>("/api/auth/status").then(setStatus).catch(() => setStatus({ hasPin: false, biometrics: false }));
@@ -131,7 +151,7 @@ export function LockScreen({ mode, title, detail, onDone, onCancel }: {
   };
 
   const useBio = async () => {
-    if (!status?.biometrics) { setErr(bioOk ? "Unlock with your PIN once to turn on Face ID / fingerprint." : "Face ID / fingerprint isn't available on this device."); return; }
+    if (!status?.biometrics) { setErr(bioOk ? `Unlock with your PIN once to turn on ${unlock.label}.` : `${unlock.label} isn't available here. Use your PIN.`); return; }
     setErr(null);
     setBusy(true);
     try {
@@ -154,9 +174,9 @@ export function LockScreen({ mode, title, detail, onDone, onCancel }: {
       <div className="lock">
         <LockArt />
         <div className="lock-offer">
-          <Icon name="faceid" size={44} />
-          <h2 className="title-2">Use Face ID or fingerprint?</h2>
-          <p className="subhead">Approve changes with Face ID or your fingerprint. Your PIN still works.</p>
+          <Icon name={unlock.icon} size={44} />
+          <h2 className="title-2">Use {unlock.label}?</h2>
+          <p className="subhead">Approve changes with {unlock.phrase}. Your PIN still works.</p>
           <button className="btn primary block" disabled={busy} onClick={async () => {
             setBusy(true);
             try { await enrollBiometrics(offerBio); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); onDone({ pin: offerBio }); }
@@ -187,9 +207,12 @@ export function LockScreen({ mode, title, detail, onDone, onCancel }: {
           {deleteMode ? <Icon name="backspace" size={24} /> : mode === "sign" ? <span className="lock-cancel">Cancel</span> : <Icon name="lock" size={24} />}
         </button>
         <button onClick={() => press("0")} disabled={busy}>0</button>
-        <button aria-label="Use Face ID or fingerprint" className={`lock-aux ${status?.biometrics ? "" : "dim"}`} onClick={useBio} disabled={busy || mode === "setup"}>
-          <Icon name="faceid" size={26} />
-        </button>
+        {/* Only when this device can do it: otherwise the key stays empty, like the blank key on an iPhone keypad. */}
+        {bioOk && mode !== "setup" ? (
+          <button aria-label={`Use ${unlock.label}`} className={`lock-aux ${status?.biometrics ? "" : "dim"}`} onClick={useBio} disabled={busy}>
+            <Icon name={unlock.icon} size={26} />
+          </button>
+        ) : <span className="lock-aux" aria-hidden="true" />}
       </div>
     </div>
   );
@@ -295,6 +318,10 @@ function ProgressOverlay({ ov, close }: { ov: Overlay; close: () => void }) {
 }
 
 function ApprovalSheet({ title, approval, onContinue, onCancel }: { title: string; approval: Approval; onContinue: () => void; onCancel: () => void }) {
+  // Name the step that comes next truthfully: this device's unlock if it's set up, otherwise the PIN.
+  const [bio, setBio] = useState(false);
+  useEffect(() => { api<AuthStatus>("/api/auth/status").then((s) => setBio(!!s.biometrics)).catch(() => {}); }, []);
+  const unlock = deviceUnlock();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onCancel();
     window.addEventListener("keydown", onKey);
@@ -318,7 +345,7 @@ function ApprovalSheet({ title, approval, onContinue, onCancel }: { title: strin
           ))}
         </dl>
         {approval.note && <p className="footnote muted">{approval.note}</p>}
-        <button className="btn primary block" onClick={onContinue} autoFocus><Icon name="faceid" size={18} />Approve with PIN or Face ID</button>
+        <button className="btn primary block" onClick={onContinue} autoFocus><Icon name={bio ? unlock.icon : "lock"} size={18} />Confirm with {bio ? unlock.label : "PIN"}</button>
         <button className="btn ghost block" onClick={onCancel}>Cancel</button>
       </div>
     </div>
@@ -350,7 +377,8 @@ export function SignButton({ title, detail, approval, progress, onSigned, childr
         } finally { setBusy(false); }
       }}
     >
-      {busy ? <span className="spinner" /> : <Icon name="faceid" size={18} />}
+      {/* The button says what it does; how you confirm is named on the next step. */}
+      {busy && <span className="spinner" />}
       <span>{children}</span>
     </button>
   );
