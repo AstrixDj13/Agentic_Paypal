@@ -61,7 +61,15 @@ h1, h2, h3, h4, p, ol, ul { margin: 0; }
   box-shadow: var(--shadow-md);
   border: 1px solid transparent;
 }
-@media (prefers-color-scheme: dark) { .card { border-color: var(--border); } }
+/* One card material across the app. In dark mode every card gets the same lit glass as Home's top cards: a soft white
+   gradient, a hairline edge and a highlight on the top rim (no blur: there's nothing behind most cards to blur). */
+@media (prefers-color-scheme: dark) {
+  .card, .tile {
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.04)), var(--bg);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 10px 28px rgba(0, 0, 0, 0.3);
+  }
+}
 .card.empty { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); text-align: center; padding: var(--space-6) var(--space-5); }
 .card.tappable { width: 100%; font: inherit; color: inherit; }
 .card.tappable:active { transform: scale(0.99); }
@@ -1400,3 +1408,21 @@ html.app-locked, html.app-locked body { overflow: hidden; overscroll-behavior: n
 .trust-line { display: flex; align-items: center; gap: 10px; width: 100%; padding: 14px 16px; text-align: left; font: inherit; font-size: var(--text-sm); color: inherit; cursor: pointer; }
 .trust-line:active { transform: scale(0.99); }
 .tile.hero-glass { border-radius: var(--radius-lg); }
+
+/* Agents status: a capsule that names its action, so it reads as a control ("● 4 agents active | ⏸ Pause") */
+.agents-status { height: 34px; margin-left: 0; padding: 0 4px 0 12px; gap: 10px; border-radius: 17px; font-size: var(--text-sm);
+  background: color-mix(in srgb, var(--surface) 70%, transparent); border: 1px solid var(--border); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06); }
+@media (prefers-color-scheme: dark) { .agents-status { background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.14); color: #fff; } }
+.status-state { display: inline-flex; align-items: center; gap: 7px; font-weight: 500; }
+.status-action { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 11px; border-radius: 13px; font-weight: 600;
+  background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.agents-status.is-paused { color: inherit; font-weight: 500; }
+.agents-status.is-paused .status-state { color: var(--warn); font-weight: 600; }
+.agents-status.is-paused .status-action { background: var(--brand-blue); color: #fff; }
+.agents-status svg { opacity: 1; }
+.balance-meta { margin-top: 2px; }
+
+/* Snap: a card like its neighbours, not a blue link row */
+.snap-row { display: flex; align-items: center; gap: 12px; width: 100%; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.snap-row > svg:first-child { flex: none; color: var(--brand-blue); }
+.snap-row:active { transform: scale(0.99); }

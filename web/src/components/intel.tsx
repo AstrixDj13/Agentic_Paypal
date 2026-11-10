@@ -87,7 +87,8 @@ export function NoticedCard({ onUse, onOpenKnows, onSnap }: { onUse: (p: AgentPr
     <section className="stack-sm">
       <div className="section-head">
         <h2 className="section-title">Pocket noticed</h2>
-        <button className="btn sm ghost" onClick={onOpenKnows}>What Pocket knows</button>
+        {/* Only when a suggestion fills the card: otherwise the card itself is the way in (one entry point, not two). */}
+        {top && <button className="btn sm ghost" onClick={onOpenKnows}>What Pocket knows</button>}
       </div>
       {top ? (
         <SuggestionCard s={top} onUse={onUse} onDismiss={async () => { await api("/api/intel/dismiss", { key: top.key }); refresh(); }} />
@@ -101,7 +102,14 @@ export function NoticedCard({ onUse, onOpenKnows, onSnap }: { onUse: (p: AgentPr
           <Icon name="chevronRight" size={16} className="muted" />
         </button>
       )}
-      <button className="link-row" onClick={onSnap}><Icon name="camera" size={18} /><span className="grow">Snap something you want</span><Icon name="chevronRight" size={16} /></button>
+      <button className="card snap-row" onClick={onSnap}>
+        <Icon name="camera" size={20} />
+        <span className="grow stack-xs" style={{ textAlign: "left" }}>
+          <strong className="subhead">Snap something you want</strong>
+          <span className="footnote muted">Take a photo; Pocket finds it in real stores.</span>
+        </span>
+        <Icon name="chevronRight" size={16} className="muted" />
+      </button>
     </section>
   );
 }
@@ -276,19 +284,6 @@ export function KnowsPage({ back, onUse, onSnap, show }: { back: () => void; onU
           <span className="footnote muted">{p.signalCount} thing{p.signalCount === 1 ? "" : "s"} noticed · shopping pages and searches only</span>
         </span>
         <Switch on={!intel.paused} onChange={() => call("/api/intel/pause", { paused: !intel.paused }, intel.paused ? "Learning resumed." : "Learning paused. Nothing new is recorded.")} label="Learning on" />
-      </div>
-
-      <div className="card row between">
-        <span className="stack-xs grow">
-          <strong className="headline">Notifications</strong>
-          <span className="footnote muted">{push === "on" ? "On for this phone." : push === "denied" ? "Blocked in your browser settings." : push === "unsupported" ? "Not available here. On iPhone, add Pocket to your Home Screen." : "One check-in a week, plus anything urgent."}</span>
-        </span>
-        {push === "on" || push === "off" ? (
-          <Switch on={push === "on"} onChange={async () => {
-            try { if (push === "on") { await disablePush(); setPush("off"); show("Notifications off."); } else { await enablePush(); setPush("on"); show("Notifications on. A test one is on its way."); } }
-            catch (e) { show((e as Error).message, true); setPush(await pushState()); }
-          }} label="Notifications" />
-        ) : null}
       </div>
 
       {checkin && (

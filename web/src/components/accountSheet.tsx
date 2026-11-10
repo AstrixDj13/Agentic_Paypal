@@ -3,7 +3,6 @@ import { api, type AppState } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { Mark } from "./Brand";
 import { deviceUnlock, type AuthStatus } from "./lock";
-import { useResumeAll, type SetKill } from "./pause";
 import { signOut } from "./account";
 import { disablePush, enablePush, pushState } from "../push";
 import { Switch } from "./ui";
@@ -11,7 +10,7 @@ import { Switch } from "./ui";
 /**
  * Account, the way Apple apps do it: a round avatar in Home's corner opens this sheet, laid out like iOS Settings
  * (an identity header, then short grouped lists). It gathers what had no home: who you're signed in as, security,
- * notifications, privacy, the Black Box records and sign out. Nothing here moves money.
+ * notifications, privacy and sign out. Pause lives on Home and the Black Box in Activity. Nothing here moves money.
  */
 
 /** Initials from an email's name part ("anubhav.goswami@…" -> "AG"); none without an account. */
@@ -48,9 +47,9 @@ function Row({ icon, title, detail, onClick, trailing }: {
   return onClick ? <button type="button" className="set-row" onClick={onClick}>{body}</button> : <div className="set-row">{body}</div>;
 }
 
-export function AccountSheet({ state, email, signedIn, act, setKill, go, show }: {
+export function AccountSheet({ state, email, signedIn, act, go, show }: {
   state: AppState; email?: string | null; signedIn: boolean;
-  act: (fn: () => Promise<unknown>, ok?: string) => unknown; setKill: SetKill;
+  act: (fn: () => Promise<unknown>, ok?: string) => unknown;
   go: (path: string) => void; show: (t: string, e?: boolean) => void;
 }) {
   const [auth, setAuth] = useState<AuthStatus | null>(null);
@@ -63,9 +62,6 @@ export function AccountSheet({ state, email, signedIn, act, setKill, go, show }:
 
   const ini = initialsOf(email);
   const unlock = deviceUnlock();
-  const resume = useResumeAll(setKill); // resuming gives spending power back: it asks for your PIN
-  const open = state.pockets.filter((p) => !p.closedAt).length;
-  const records = state.purchases.length;
   const connect = () => act(async () => {
     const { approveUrl } = await api<{ approveUrl: string }>("/api/paypal/connect", {});
     location.href = approveUrl;
@@ -90,12 +86,6 @@ export function AccountSheet({ state, email, signedIn, act, setKill, go, show }:
           : <button className="btn sm primary" onClick={connect}><Mark size={16} mono />Connect PayPal</button>}
       </div>
 
-      <section className="set-group" aria-label="Spending">
-        <Row icon={state.killSwitch ? "play" : "pause"} title="Pause all agents"
-          detail={state.killSwitch ? "Nothing will be bought until you resume." : `${open} agent${open === 1 ? "" : "s"} can buy within their rules.`}
-          trailing={<Switch on={!!state.killSwitch} onChange={() => (state.killSwitch ? resume() : setKill(true))} label="Pause all agents" tone="danger" />} />
-      </section>
-
       <section className="set-group" aria-label="Security">
         <Row icon="lock" title="PIN" detail={auth ? (auth.hasPin ? "Signs every payment and rule change" : "Not set up") : "…"}
           trailing={<span className="set-value">{auth?.hasPin ? "On" : "Off"}</span>} />
@@ -109,10 +99,6 @@ export function AccountSheet({ state, email, signedIn, act, setKill, go, show }:
           trailing={push === "unsupported" || push === "denied" || push === null ? <span className="set-value">Off</span>
             : <Switch on={push === "on"} onChange={() => { if (!pushBusy) togglePush(); }} label="Notifications" />} />
         <Row icon="sparkles" title="What Pocket knows" detail="What it learned, your check-in, and how to wipe it" onClick={() => go("/knows")} />
-      </section>
-
-      <section className="set-group" aria-label="Records">
-        <Row icon="box" title="Black Box" detail={`A tamper-proof record of every decision${records ? ` · ${records} purchase${records === 1 ? "" : "s"}` : ""}`} onClick={() => go("/console")} />
       </section>
 
       {signedIn && (

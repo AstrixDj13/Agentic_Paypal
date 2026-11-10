@@ -343,7 +343,7 @@ export default function PocketApp() {
             {sheet.kind === "wrong" && <ReportWrong state={state} id={sheet.id} refresh={refresh} show={show} setSheet={setSheet} />}
             {sheet.kind === "evidence" && <EvidenceSheet state={state} id={sheet.id} />}
             {sheet.kind === "pause" && <PauseSheet state={state} setKill={setKill} close={close} />}
-            {sheet.kind === "account" && <AccountSheet state={state} email={account.mode === "accounts" ? account.email : null} signedIn={account.mode === "accounts" && !!account.email} act={act} setKill={setKill} go={(path) => { close(); navigate(path); }} show={show} />}
+            {sheet.kind === "account" && <AccountSheet state={state} email={account.mode === "accounts" ? account.email : null} signedIn={account.mode === "accounts" && !!account.email} act={act} go={(path) => { close(); navigate(path); }} show={show} />}
             {sheet.kind === "found" && <FoundSheet state={state} result={sheet.result} setSheet={setSheet} />}
           </Sheet>
         )}
@@ -403,7 +403,6 @@ function Home({ state, act, setSheet, setKill, goActivity, openAgent, goAgents, 
           <Money value={total} />
           <p className="footnote muted balance-meta">
             {open.length ? <AgentsStatus state={state} onOpen={() => setSheet({ kind: "pause" })} /> : "No agents yet"}
-            {state.vault && <span className="row" style={{ gap: 4 }}><Icon name="check" size={13} stroke={2.4} className="ok-text" />PayPal connected</span>}
           </p>
           {open.length === 0 && (
             <div className="balance-action">
@@ -510,7 +509,6 @@ function Home({ state, act, setSheet, setKill, goActivity, openAgent, goAgents, 
 
       <NoticedCard onUse={makeAgent} onOpenKnows={openKnows} onSnap={snap} />
 
-      <p className="trust-note"><Icon name="shield" size={16} />Agents can only spend what's in their own pocket. Your PayPal balance and cards are never shared with them.</p>
     </>
   );
 }
@@ -627,7 +625,7 @@ function AgentsTab({ state, setSheet, openAgent, show, refresh, back, setKill }:
         </section>
       )}
 
-      <p className="trust-note"><Icon name="shield" size={16} />Each agent can only spend its own budget, within the rules you approved.</p>
+      <p className="trust-note"><Icon name="shield" size={16} />Each agent can only spend its own budget, within the rules you approved. Your PayPal balance and cards are never shared with them.</p>
     </>
   );
 }

@@ -28,10 +28,9 @@ export function AgentsStatus({ state, onOpen }: { state: AppState; onOpen: () =>
   const paused = !!state.killSwitch;
   return (
     <button className={`agents-status ${paused ? "is-paused" : ""}`} onClick={onOpen}
-      aria-label={paused ? "All agents paused. Open controls" : `${open} agents active. Open controls`}>
-      <span className="status-dot" aria-hidden="true" />
-      {paused ? "All agents paused" : `${open} agent${open === 1 ? "" : "s"} active`}
-      <Icon name="chevronRight" size={12} stroke={2.6} />
+      aria-label={paused ? "All agents paused. Resume" : `${open} agents active. Pause all`}>
+      <span className="status-state"><span className="status-dot" aria-hidden="true" />{paused ? "All paused" : `${open} agent${open === 1 ? "" : "s"} active`}</span>
+      <span className="status-action"><Icon name={paused ? "play" : "pause"} size={13} stroke={2.6} />{paused ? "Resume" : "Pause"}</span>
     </button>
   );
 }
