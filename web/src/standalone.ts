@@ -130,3 +130,15 @@ export function useUpdateCheck(offer: () => void) {
     return () => { document.removeEventListener("visibilitychange", onVisible); clearInterval(t); };
   }, [offer]);
 }
+
+/**
+ * The number on the app icon: how many things wait for you (like unread messages). Supported for installed web apps on
+ * iPhone, Mac and Windows; on Android the launcher shows its own dot from notifications instead.
+ */
+export function useAppBadge(count: number) {
+  useEffect(() => {
+    const nav = navigator as Navigator & { setAppBadge?: (n?: number) => Promise<void>; clearAppBadge?: () => Promise<void> };
+    if (!nav.setAppBadge) return;
+    (count > 0 ? nav.setAppBadge(count) : nav.clearAppBadge?.())?.catch(() => {});
+  }, [count]);
+}

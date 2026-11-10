@@ -1426,3 +1426,28 @@ html.app-locked, html.app-locked body { overflow: hidden; overscroll-behavior: n
 .snap-row { display: flex; align-items: center; gap: 12px; width: 100%; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .snap-row > svg:first-child { flex: none; color: var(--brand-blue); }
 .snap-row:active { transform: scale(0.99); }
+
+/* ------------------------------------ Updates: the bell on Home and one list of everything agents told you ------------------------------------ */
+.hero-actions { display: inline-flex; align-items: center; gap: 10px; }
+.updates-btn { position: relative; }
+.bell-count { position: absolute; top: -3px; right: -3px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 10px; display: grid; place-items: center;
+  background: var(--danger); color: #fff; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--bg); }
+.bell-dot { position: absolute; top: 7px; right: 8px; width: 9px; height: 9px; border-radius: 50%; background: var(--brand-blue); box-shadow: 0 0 0 2px var(--bg); }
+
+.updates-sheet { gap: 18px; }
+.upd-head { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--text-sm); font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.upd-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; display: grid; place-items: center; background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); font-size: 12px; letter-spacing: 0; }
+.upd-row { position: relative; display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 12px 14px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.upd-row:active { background: color-mix(in srgb, var(--text) 7%, transparent); }
+.upd-row + .upd-row::before { content: ""; position: absolute; top: 0; left: 60px; right: 0; height: 1px; background: var(--border); }
+.upd-lead { flex: none; padding-top: 1px; }
+.upd-ico { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--surface); color: var(--text-muted); }
+.upd-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.upd-title { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upd-detail { font-size: var(--text-sm); color: var(--text-muted); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.upd-meta { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; padding-top: 2px; }
+.upd-time { font-size: var(--text-xs); color: var(--text-muted); white-space: nowrap; }
+.upd-flag { width: 9px; height: 9px; border-radius: 50%; }
+.upd-flag.needs { background: var(--warn); }
+.upd-flag.new { background: var(--brand-blue); }
+.upd-clear { display: flex; align-items: center; gap: 6px; justify-content: center; }

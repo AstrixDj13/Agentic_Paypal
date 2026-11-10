@@ -12,7 +12,8 @@ import { Money, Segmented, Sheet, Toast } from "../components/ui";
 import { BlackBox, EvidenceSheet } from "./Console";
 import AgentPage, { AgentDetails } from "./AgentPage";
 import { SPRING, reducedMotion, launch, land, flyFrom } from "../motion";
-import { usePullToRefresh, useUpdateCheck, useViewportGuard } from "../standalone";
+import { useAppBadge, usePullToRefresh, useUpdateCheck, useViewportGuard } from "../standalone";
+import { UpdatesButton, UpdatesSheet, needsYou, unreadCount, useSeen } from "../components/updates";
 import { AgentCardFace, AgentIcon, BudgetBar, activeMandate, amount, budgetOf, cardStats, pendingFor, toneOf, unreadFor } from "../components/agent";
 import { AgentMenu, CloseAgent, DeleteAgent, JobSheet, MoveMoney, NewAgent, RenameAgent } from "../components/agentSheets";
 import { LockScreen, SignButton, SignerProvider } from "../components/lock";
@@ -40,6 +41,7 @@ export type SheetState =
   | { kind: "evidence"; id: string }
   | { kind: "account" }
   | { kind: "pause" }
+  | { kind: "updates" }
   | { kind: "found"; id: string; result: FindResult }
   | null;
 
@@ -249,6 +251,11 @@ export default function PocketApp() {
   // Installed app: the page can't be shifted off screen by the keyboard, pull down to refresh, and a reload offer
   // when a newer version is deployed.
   useViewportGuard();
+  // Updates: what needs you (also the number on the app icon) and anything new since you last looked.
+  const { seenAt, markSeen } = useSeen();
+  const needCount = state ? needsYou(state).length : 0;
+  const unread = state ? unreadCount(state, seenAt) : 0;
+  useAppBadge(needCount);
   const canPull = !!state && !sheet && (tab === "home" || tab === "agents" || tab === "activity" || tab === "blackbox" || tab === "knows");
   const pullRef = usePullToRefresh(
     () => (tab === "agents" ? document.querySelector<HTMLElement>(".push-layer") : mainRef.current),
@@ -291,7 +298,7 @@ export default function PocketApp() {
           ) : (
             <>
               {/* Home stays mounted under the Agents layer, so going back is instant and the slide can reveal it. */}
-              {(tab === "home" || tab === "agents") && <Home state={state} act={act} setSheet={setSheet} setKill={setKill} goActivity={(f) => navigate(f ? `/activity?f=${f}` : "/activity")} openAgent={openAgent} goAgents={goAgents} goBlackBox={() => navigate("/console")} makeAgent={makeAgent} openKnows={() => navigate("/knows")} snap={snap.open} accountEmail={account.mode === "accounts" ? account.email : null} openAccount={() => setSheet({ kind: "account" })} />}
+              {(tab === "home" || tab === "agents") && <Home state={state} act={act} setSheet={setSheet} setKill={setKill} goActivity={(f) => navigate(f ? `/activity?f=${f}` : "/activity")} openAgent={openAgent} goAgents={goAgents} goBlackBox={() => navigate("/console")} makeAgent={makeAgent} openKnows={() => navigate("/knows")} snap={snap.open} accountEmail={account.mode === "accounts" ? account.email : null} openAccount={() => setSheet({ kind: "account" })} updates={{ needs: needCount, unread, open: () => setSheet({ kind: "updates" }) }} />}
               {tab === "knows" && <KnowsPage back={() => navigate("/")} onUse={makeAgent} onSnap={snap.open} show={show} />}
               {tab === "share" && <SharePage onResult={onShared} show={show} done={shareDone} />}
               {tab === "agent" && <AgentPage state={state} agentId={agentId} act={act} refresh={refresh} show={show} setSheet={setSheet} back={() => navigate("/agents")} />}
@@ -342,6 +349,8 @@ export default function PocketApp() {
             {sheet.kind === "purchase" && <PurchaseDetail state={state} id={sheet.id} act={act} setSheet={setSheet} openEvidence={openEvidence} />}
             {sheet.kind === "wrong" && <ReportWrong state={state} id={sheet.id} refresh={refresh} show={show} setSheet={setSheet} />}
             {sheet.kind === "evidence" && <EvidenceSheet state={state} id={sheet.id} />}
+            {sheet.kind === "updates" && <UpdatesSheet state={state} seenAt={seenAt} markSeen={markSeen}
+              go={(w) => { if ("purchase" in w) setSheet({ kind: "purchase", id: w.purchase }); else { close(); if ("agent" in w) openAgent(w.agent); else navigate(w.path); } }} />}
             {sheet.kind === "pause" && <PauseSheet state={state} setKill={setKill} close={close} />}
             {sheet.kind === "account" && <AccountSheet state={state} email={account.mode === "accounts" ? account.email : null} signedIn={account.mode === "accounts" && !!account.email} act={act} go={(path) => { close(); navigate(path); }} show={show} />}
             {sheet.kind === "found" && <FoundSheet state={state} result={sheet.result} setSheet={setSheet} />}
@@ -357,11 +366,12 @@ export default function PocketApp() {
 
 /* ====================================== Home ====================================== */
 
-function Home({ state, act, setSheet, setKill, goActivity, openAgent, goAgents, goBlackBox, makeAgent, openKnows, snap, accountEmail, openAccount }: {
+function Home({ state, act, setSheet, setKill, goActivity, openAgent, goAgents, goBlackBox, makeAgent, openKnows, snap, accountEmail, openAccount, updates }: {
   state: AppState; act: Act; setSheet: (s: SheetState) => void; setKill: SetKill; goActivity: (filter?: string) => void;
   openAgent: (id: string) => void; goAgents: () => void; goBlackBox: () => void;
   makeAgent: (p: AgentPrefill) => void; openKnows: () => void; snap: () => void;
   accountEmail?: string | null; openAccount: () => void;
+  updates: { needs: number; unread: number; open: () => void };
 }) {
   const looks = state.purchases.filter((p) => p.status === "awaiting_look");
   const open = state.pockets.filter((p) => !p.closedAt);
@@ -395,7 +405,10 @@ function Home({ state, act, setSheet, setKill, goActivity, openAgent, goAgents, 
         <span className="hero-watermark" aria-hidden="true"><Mark size={280} /></span>
         <div className="hero-top">
           <BrandLockup height={46} />
-          <AccountButton email={accountEmail} onOpen={openAccount} />
+          <span className="hero-actions">
+            <UpdatesButton needs={updates.needs} unread={updates.unread} onOpen={updates.open} />
+            <AccountButton email={accountEmail} onOpen={openAccount} />
+          </span>
         </div>
         {/* No card around the balance: it sits on the brand wash, with the agents' cards peeking in from the right. */}
         <div className={`balance ${paused ? "is-paused" : ""}`}>
