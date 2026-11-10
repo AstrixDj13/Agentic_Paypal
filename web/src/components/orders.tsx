@@ -54,7 +54,7 @@ export function OrderCard({ state, o, act }: { state: AppState; o: Order; act: A
         <p key={l.itemId} className="order-note"><Icon name="swap" size={14} />{l.ask!.reason}</p>
       ))}
 
-      <button className="link-btn order-toggle" onClick={() => setOpen(!open)} aria-expanded={open}>{open ? "Hide items" : `See all ${lines.length} items`}</button>
+      <button className="link-btn order-toggle" onClick={() => setOpen(!open)} aria-expanded={open}>{open ? "Hide the list" : "See the list"}</button>
       {open && (
         <ul className="order-lines">
           {lines.map((l) => (
@@ -198,30 +198,65 @@ export function ListEditor({ rows, setRows, groups }: { rows: ListRow[]; setRows
   const used = new Set(rows.map((r) => groupOf(r.productId)?.id));
   const total = rows.reduce((t, r) => t + r.usualPrice * r.qty, 0);
   const set = (i: number, patch: Partial<ListRow>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const left = groups.filter((g) => !used.has(g.id));
   return (
     <div className="stack-sm list-editor">
-      {rows.map((r, i) => {
-        const g = groupOf(r.productId);
-        return (
-          <div key={i} className="list-row">
-            <span className="grow stack-xs">
-              <select className="input sm-input" value={r.productId} aria-label={`${g?.name ?? "Item"} brand`} onChange={(e) => { const p = product(e.target.value); set(i, { productId: e.target.value, usualPrice: p?.price ?? r.usualPrice }); }}>
-                {g?.products.map((p) => <option key={p.id} value={p.id}>{p.title} · {p.size}</option>)}
-              </select>
-              <span className="row" style={{ gap: 8 }}>
-                <label className="caption muted row" style={{ gap: 4 }}>Qty<input className="input sm-input qty" inputMode="numeric" value={r.qty} onChange={(e) => set(i, { qty: Math.max(1, Number(e.target.value.replace(/\D/g, "")) || 1) })} /></label>
-                <label className="caption muted row" style={{ gap: 4 }}>Usually $<input className="input sm-input price" inputMode="decimal" value={r.usualPrice} onChange={(e) => set(i, { usualPrice: Number(e.target.value.replace(/[^0-9.]/g, "")) || 0 })} /></label>
+      {/* An inset grouped list, like Reminders: the product (tap to change brand), what you usually pay, and a stepper. */}
+      <ul className="grouped-list" aria-label="Your weekly list">
+        {rows.map((r, i) => {
+          const g = groupOf(r.productId);
+          const p = product(r.productId);
+          return (
+            <li key={`${r.productId}-${i}`} className="list-row">
+              <span className="lr-main">
+                <span className="lr-pick">
+                  <span className="lr-title">{p?.title ?? g?.name ?? "Item"}</span>
+                  <span className="lr-size">{p?.size}</span>
+                  <Icon name="chevronRight" size={12} stroke={2.4} className="lr-chev" />
+                  <select value={r.productId} aria-label={`${g?.name ?? "Item"}: change brand`} onChange={(e) => { const np = product(e.target.value); set(i, { productId: e.target.value, usualPrice: np?.price ?? r.usualPrice }); }}>
+                    {g?.products.map((x) => <option key={x.id} value={x.id}>{x.title} · {x.size} · {money(x.price)}</option>)}
+                  </select>
+                </span>
+                <label className="lr-price caption muted">Usually
+                  <PriceInput value={r.usualPrice} onChange={(v) => set(i, { usualPrice: v })} label={`Usual price of ${p?.title ?? "item"}`} />
+                </label>
               </span>
-            </span>
-            <button type="button" className="icon-btn" aria-label={`Remove ${g?.name ?? "item"}`} onClick={() => setRows(rows.filter((_, j) => j !== i))}><Icon name="close" size={16} /></button>
-          </div>
-        );
-      })}
-      <select className="input" value="" aria-label="Add an item" onChange={(e) => { const g = groups.find((x) => x.id === e.target.value); if (g) setRows([...rows, { productId: g.products[0].id, qty: 1, usualPrice: g.products[0].price }]); }}>
-        <option value="">+ Add an item</option>
-        {groups.filter((g) => !used.has(g.id)).map((g) => <option key={g.id} value={g.id}>{g.name} · {g.size}</option>)}
-      </select>
-      <p className="caption muted">Usually about {money(total)} a week. "Usually" is what you pay today; savings are only ever counted against it.</p>
+              <span className="stepper" role="group" aria-label={`How many ${p?.title ?? "items"}`}>
+                <button type="button" aria-label={r.qty > 1 ? "One fewer" : `Remove ${p?.title ?? "item"}`} className={r.qty > 1 ? "" : "remove"}
+                  onClick={() => (r.qty > 1 ? set(i, { qty: r.qty - 1 }) : setRows(rows.filter((_, j) => j !== i)))}>
+                  <Icon name={r.qty > 1 ? "minus" : "trash"} size={14} stroke={2.4} />
+                </button>
+                <span className="stepper-n" aria-live="polite">{r.qty}</span>
+                <button type="button" aria-label="One more" disabled={r.qty >= 20} onClick={() => set(i, { qty: r.qty + 1 })}><Icon name="plus" size={14} stroke={2.4} /></button>
+              </span>
+            </li>
+          );
+        })}
+        {left.length > 0 && (
+          <li className="list-row list-add">
+            <span className="lr-add"><Icon name="plus" size={16} stroke={2.4} />Add an item</span>
+            <select value="" aria-label="Add an item" onChange={(e) => { const g = groups.find((x) => x.id === e.target.value); if (g) setRows([...rows, { productId: g.products[0].id, qty: 1, usualPrice: g.products[0].price }]); }}>
+              <option value="">Add an item</option>
+              {left.map((g) => <option key={g.id} value={g.id}>{g.name} · {g.size}</option>)}
+            </select>
+          </li>
+        )}
+      </ul>
+      <p className="caption muted">{rows.length} items, usually about <strong>{money(total)}</strong> a week. Savings are only ever counted against what you usually pay.</p>
     </div>
+  );
+}
+
+/** A price you can type freely; it settles to two decimals ("2.90") when you leave the field. */
+function PriceInput({ value, onChange, label }: { value: number; onChange: (v: number) => void; label: string }) {
+  const [text, setText] = useState<string | null>(null);
+  return (
+    <span className="price-input">
+      <span aria-hidden="true">$</span>
+      <input inputMode="decimal" aria-label={label} value={text ?? value.toFixed(2)}
+        onFocus={(e) => e.currentTarget.select()}
+        onChange={(e) => { const t = e.target.value.replace(/[^0-9.]/g, ""); setText(t); onChange(Number(t) || 0); }}
+        onBlur={() => setText(null)} />
+    </span>
   );
 }

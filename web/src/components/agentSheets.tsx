@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, money, useIntel, type AgentKind, type AgentPrefill, type AppState, type AskMode, type MandateDraft, type Pocket } from "../api";
 import { DescribeFields, RuleTips, SuggestionCard } from "./intel";
 import { ListEditor, useCatalog, type ListRow } from "./orders";
 import { Icon } from "./Icon";
-import { AGENT_COLORS, AgentIcon, PALETTE, activeMandate, agentTone, limitsLine, suggestPocketName, toneOf } from "./agent";
+import { AGENT_COLORS, AgentCardFace, AgentIcon, PALETTE, activeMandate, agentTone, limitsLine, suggestPocketName, toneOf, type AgentTone } from "./agent";
+import { SPRING, reducedMotion } from "../motion";
 import { SignButton, useSigner, type Signature } from "./lock";
 import { MandateChips, type Act } from "./purchase";
 import { Segmented } from "./ui";
@@ -11,7 +12,9 @@ import { Segmented } from "./ui";
 /* ------------------------------------ Rule review (shared) ------------------------------------ */
 
 /** Editable structured rules the AI (or plain parser) read from the user's words. */
-export function RuleReview({ draft, setDraft, source }: { draft: MandateDraft; setDraft: (d: MandateDraft) => void; source: string }) {
+export function RuleReview({ draft, setDraft, source, kind = "hunt" }: { draft: MandateDraft; setDraft: (d: MandateDraft) => void; source: string; kind?: AgentKind }) {
+  // A meal right now has no shoe size or brand list: only the price and how many.
+  const meal = kind === "now";
   const size = draft.required.size_us ?? "";
   const brands = (draft.allowed.brand ?? []).join(", ");
   const set = (patch: Partial<MandateDraft>) => setDraft({ ...draft, ...patch });
@@ -23,14 +26,15 @@ export function RuleReview({ draft, setDraft, source }: { draft: MandateDraft; s
       </div>
       <label className="field">Job<input className="input" value={draft.item} onChange={(e) => set({ item: e.target.value })} /></label>
       <div className="row" style={{ gap: 12 }}>
-        <label className="field grow">US size<input className="input" value={size} placeholder="any" onChange={(e) => {
+        {!meal && <label className="field grow">US size<input className="input" value={size} placeholder="any" onChange={(e) => {
           const required = { ...draft.required };
           if (e.target.value.trim()) required.size_us = e.target.value; else delete required.size_us;
           set({ required });
-        }} /></label>
+        }} /></label>}
         <label className="field grow">Max price ($)<input className="input" inputMode="decimal" value={draft.maxUnitPrice} onChange={(e) => set({ maxUnitPrice: Number(e.target.value.replace(/[^0-9.]/g, "")) })} /></label>
+        {meal && <label className="field" style={{ width: 96 }}>Max qty<input className="input" inputMode="numeric" value={draft.maxQuantity} onChange={(e) => set({ maxQuantity: Number(e.target.value.replace(/\D/g, "")) || 1 })} /></label>}
       </div>
-      <div className="row" style={{ gap: 12 }}>
+      {!meal && <div className="row" style={{ gap: 12 }}>
         <label className="field grow">Brands<input className="input" value={brands} placeholder="any" onChange={(e) => {
           const list = e.target.value.split(",").map((b) => b.trim().toLowerCase()).filter(Boolean);
           const allowed = { ...draft.allowed };
@@ -38,10 +42,10 @@ export function RuleReview({ draft, setDraft, source }: { draft: MandateDraft; s
           set({ allowed });
         }} /></label>
         <label className="field" style={{ width: 96 }}>Max qty<input className="input" inputMode="numeric" value={draft.maxQuantity} onChange={(e) => set({ maxQuantity: Number(e.target.value.replace(/\D/g, "")) || 1 })} /></label>
-      </div>
+      </div>}
       <label className="field">Never buy (optional)<input className="input" value={(draft.avoid ?? []).join(", ")} placeholder="e.g. paprika" onChange={(e) => set({ avoid: e.target.value.split(",").map((w) => w.trim().toLowerCase()).filter(Boolean) })} /></label>
       <label className="field">Expires<input className="input" type="date" value={draft.expiresAt.slice(0, 10)} onChange={(e) => e.target.value && set({ expiresAt: new Date(`${e.target.value}T23:59:59Z`).toISOString() })} /></label>
-      <DescribeFields draft={draft} set={set} />
+      {!meal && <DescribeFields draft={draft} set={set} />}
       <RuleTips draft={draft} apply={set} />
       <MandateChips m={draft} />
       <p className="footnote muted">These rules are checked at checkout, before anything is paid.</p>
@@ -77,6 +81,39 @@ const EXAMPLES = [
   "Concert tickets under $80 each, max 2, until Dec 15",
   "Coffee beans under $25 a bag, max 2 bags",
 ];
+/** Right-now examples that match the simulated restaurants. */
+const NOW_EXAMPLES = [
+  "Chicken biryani under $15 with delivery, within 30 minutes",
+  "Pizza under $18 with delivery, within 30 minutes",
+  "Sushi under $20 with delivery, within 40 minutes",
+];
+const STEP_NAMES = ["Budget", "Job", "Review"];
+
+/**
+ * The agent you're making, shown as the card it will become: name, job and money fill in as you go,
+ * and its colour settles once the job is known. Replaces a generic category icon.
+ */
+function CardPreview({ name, job, amount, tone, step }: { name: string; job?: string; amount: number; tone: AgentTone; step: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const first = useRef(true);
+  // A soft settle whenever the card changes colour, so the change reads as the same card, not a swap.
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    if (reducedMotion()) return;
+    ref.current?.animate([{ transform: "scale(0.97)", opacity: 0.75 }, { transform: "scale(1)", opacity: 1 }], { duration: SPRING.duration, easing: SPRING.easing });
+  }, [tone]);
+  return (
+    <div className="new-agent-hero">
+      <div className="na-card" ref={ref}>
+        <AgentCardFace agent={{ name }} item={job} left={amount} total={amount} tone={tone} />
+      </div>
+      <div className="na-steps" role="img" aria-label={`Step ${step} of 3: ${STEP_NAMES[step - 1]}`}>
+        {STEP_NAMES.map((s, i) => <i key={s} className={i + 1 === step ? "on" : i + 1 < step ? "done" : ""} />)}
+        <span className="caption muted">{STEP_NAMES[step - 1]}</span>
+      </div>
+    </div>
+  );
+}
 
 /* ------------------------------------ New agent ------------------------------------ */
 
@@ -109,9 +146,10 @@ export function NewAgent({ state, act, close, open, prefill }: { state: AppState
   const routine = kind === "routine";
   const chooseKind = (k: AgentKind) => {
     setKind(k);
-    if (k === "now") setInstruction("Chicken biryani under $15 with delivery, within 30 minutes");
-    else if (k === "hunt" && /biryani/i.test(instruction)) setInstruction(EXAMPLES[0]);
+    if (k === "now" && !NOW_EXAMPLES.includes(instruction)) setInstruction(NOW_EXAMPLES[0]);
+    else if (k === "hunt" && (/biryani/i.test(instruction) || NOW_EXAMPLES.includes(instruction))) setInstruction(EXAMPLES[0]);
   };
+  const examples = kind === "now" ? NOW_EXAMPLES.filter((x) => x !== instruction) : EXAMPLES.filter((x) => x !== instruction);
   const suggested = suggestPocketName(routine ? "weekly groceries" : d.draft?.item, state.pockets.map((p) => p.name));
   const finalName = (name ?? suggested).trim();
   const taken = state.pockets.some((p) => p.name.toLowerCase() === finalName.toLowerCase());
@@ -128,16 +166,17 @@ export function NewAgent({ state, act, close, open, prefill }: { state: AppState
 
   return (
     <div className="stack">
-      <div className="new-agent-hero">
-        <AgentIcon name={step === 3 ? shown : undefined} item={routine && step >= 2 ? "weekly groceries" : d.draft?.item ?? (step >= 2 ? instruction : undefined)} tone={agentTone(routine && step >= 2 ? "weekly groceries" : d.draft?.item ?? (step >= 2 ? instruction : undefined))} size={64} />
-        <div className="stack-xs" style={{ alignItems: "center" }}>
-          <strong className="title-2">{shown}</strong>
-          <span className="caption muted">Step {step} of 3</span>
-        </div>
-      </div>
+      <h2 className="sr-only">New agent</h2>
+      <CardPreview
+        name={shown}
+        step={step}
+        amount={Number(amount) || 0}
+        job={step === 1 ? undefined : routine ? "Weekly shop" : step === 3 && d.draft ? d.draft.item : kind === "now" ? "Right now" : "One-time hunt"}
+        tone={step === 1 ? "grey" : agentTone(routine ? "weekly groceries" : step === 3 && d.draft ? d.draft.item : instruction)}
+      />
 
       {step === 1 && (
-        <>
+        <div className="na-step" key="s1">
           {prefill?.why && <p className="footnote muted row" style={{ gap: 6 }}><Icon name="sparkles" size={14} />Suggested because: {prefill.why.charAt(0).toLowerCase() + prefill.why.slice(1)}</p>}
           <p className="subhead muted">How much can this agent spend? It can't spend more than this.</p>
           <div className="amount-input"><span>$</span><input className="input big" ref={focusAfterSheet} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} aria-label="Amount in US dollars" /></div>
@@ -145,14 +184,14 @@ export function NewAgent({ state, act, close, open, prefill }: { state: AppState
             {[50, 100, 150, 300].map((v) => <button key={v} className={`chip btnlike ${Number(amount) === v ? "on" : ""}`} onClick={() => setAmount(String(v))}>${v}</button>)}
           </div>
           <button className="btn primary block" disabled={!(Number(amount) > 0)} onClick={() => setStep(2)}>Next</button>
-        </>
+        </div>
       )}
 
       {step === 2 && (
         <Segmented<AgentKind> value={kind} onChange={chooseKind} options={[{ value: "hunt", label: "One-time hunt" }, { value: "routine", label: "Weekly shop" }, { value: "now", label: "Right now" }]} />
       )}
       {step === 2 && routine && (
-        <>
+        <div className="na-step" key="s2-routine">
           <p className="subhead muted">Your weekly list. The agent reorders it every week, buys each item where it's cheapest, and asks once about better deals.</p>
           {catalog ? <ListEditor rows={list} setRows={setRows} groups={catalog.groups} /> : <span className="spinner" />}
           <label className="field">Weekly budget ($)
@@ -163,14 +202,14 @@ export function NewAgent({ state, act, close, open, prefill }: { state: AppState
             <button className="btn ghost" onClick={() => setStep(1)}>Back</button>
             <button className="btn primary grow" disabled={!list.length || !(Number(weeklyBudget) > 0)} onClick={() => setStep(3)}>Next</button>
           </div>
-        </>
+        </div>
       )}
       {step === 2 && !routine && (
-        <>
+        <div className="na-step" key={`s2-${kind}`}>
           <p className="subhead muted">{kind === "now" ? "What do you want right now? Say the budget and how fast it must arrive." : "What should it buy? Describe it in your own words, with your limits."}</p>
-          <textarea className="input textarea" value={instruction} onChange={(e) => setInstruction(e.target.value)} aria-label="The job in your words" />
+          <textarea className="input textarea na-textarea" value={instruction} onChange={(e) => setInstruction(e.target.value)} aria-label="The job in your words" />
           {keep.refImage && <p className="footnote muted row" style={{ gap: 8 }}><img className="ref-thumb" src={`/api/intel/image/${keep.refImage}`} alt="" />Your photo will be used to search too.</p>}
-          {!prefill && ideas.length > 0 ? (
+          {!prefill && ideas.length > 0 && kind === "hunt" ? (
             <div className="stack-sm">
               <span className="caption muted row" style={{ gap: 6 }}><Icon name="sparkles" size={14} />Based on what you've been looking at</span>
               {ideas.map((s) => (
@@ -180,7 +219,10 @@ export function NewAgent({ state, act, close, open, prefill }: { state: AppState
               ))}
             </div>
           ) : (
-            <div className="chips">{EXAMPLES.slice(1).map((x) => <button key={x} className="chip btnlike" onClick={() => setInstruction(x)}>{x.split(",")[0]}</button>)}</div>
+            <div className="stack-xs">
+              <span className="caption muted">Or try</span>
+              <div className="chips scroll-chips">{examples.map((x) => <button key={x} className="chip btnlike" onClick={() => setInstruction(x)}>{x.split(/,| with delivery/)[0]}</button>)}</div>
+            </div>
           )}
           {d.err && <p className="footnote danger-text">{d.err}</p>}
           <div className="row" style={{ gap: 8 }}>
@@ -189,11 +231,11 @@ export function NewAgent({ state, act, close, open, prefill }: { state: AppState
               {d.busy ? <><span className="spinner" />Creating rules…</> : "Create rules"}
             </button>
           </div>
-        </>
+        </div>
       )}
 
       {step === 3 && routine && (
-        <>
+        <div className="na-step" key="s3-routine">
           <label className="field">Name
             <input className="input" value={name ?? suggested} maxLength={24} onChange={(e) => setName(e.target.value)} />
           </label>
@@ -211,16 +253,16 @@ export function NewAgent({ state, act, close, open, prefill }: { state: AppState
             approval={{ amount: Number(amount), rows: [{ label: "Agent", value: shown }, { label: "Job", value: `Weekly shop, ${list.length} items` }, { label: "Weekly budget", value: money(Number(weeklyBudget)) }, { label: "Swaps", value: "Always ask, this week only" }], note: "This amount moves into the agent's pocket. It can't spend more than this." }}
             onSigned={create} disabled={!finalName || taken || !list.length}>Create agent</SignButton>
           <button className="btn ghost block" onClick={() => setStep(2)}>Back</button>
-        </>
+        </div>
       )}
 
       {step === 3 && !routine && d.draft && (
-        <>
+        <div className="na-step" key="s3">
           <label className="field">Name
             <input className="input" value={name ?? suggested} maxLength={24} onChange={(e) => setName(e.target.value)} aria-describedby="name-hint" />
           </label>
           <p id="name-hint" className={`footnote ${taken ? "danger-text" : "muted"}`}>{taken ? `You already have an agent called ${finalName}.` : "Suggested from its job. You can change it any time."}</p>
-          <RuleReview draft={d.draft} setDraft={d.setDraft} source={d.source} />
+          <RuleReview draft={d.draft} setDraft={d.setDraft} source={d.source} kind={kind} />
           <div className="stack-sm">
             <span className="headline">When should {shown} ask you?</span>
             <Segmented<AskMode> value={askMode} onChange={setAskMode} options={[{ value: "anything", label: "About anything" }, { value: "money", label: "Only about money" }]} />
@@ -232,7 +274,7 @@ export function NewAgent({ state, act, close, open, prefill }: { state: AppState
           </div>
           <SignButton progress={{ working: `Setting up ${finalName}`, done: `${finalName} is ready` }} title={`Create ${shown}`} detail={`${money(Number(amount))} for one job: ${d.draft.item}`} approval={{ amount: Number(amount), rows: [{ label: "Agent", value: shown }, { label: "Job", value: d.draft.item }, { label: "Limits", value: limitsLine(d.draft) }, { label: "Asks you", value: askMode === "anything" ? "Before every purchase" : "When a limit is involved" }], note: "This amount moves into the agent's pocket. It can't spend more than this." }} onSigned={create} disabled={!finalName || taken || !(d.draft.maxUnitPrice > 0) || !d.draft.item.trim()}>Create agent</SignButton>
           <button className="btn ghost block" onClick={() => setStep(2)}>Back</button>
-        </>
+        </div>
       )}
     </div>
   );

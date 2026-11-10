@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 
 /* ------------------------------------ Money ------------------------------------ */
@@ -26,9 +26,27 @@ export function Switch({ on, onChange, label, tone = "ok" }: { on: boolean; onCh
 
 /* ------------------------------------ Segmented control ------------------------------------ */
 
+/** iOS-style segmented control: one raised thumb that slides to the chosen option. */
 export function Segmented<T extends string>({ value, options, onChange }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [thumb, setThumb] = useState<{ x: number; w: number; ready: boolean } | null>(null);
+  useLayoutEffect(() => {
+    const box = ref.current;
+    if (!box) return;
+    const place = () => {
+      const on = box.querySelector<HTMLElement>("button.on");
+      if (!on) return setThumb(null);
+      // The first placement jumps; every later one slides.
+      setThumb((t) => ({ x: on.offsetLeft, w: on.offsetWidth, ready: !!t }));
+    };
+    place();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(place) : null;
+    ro?.observe(box);
+    return () => ro?.disconnect();
+  }, [value, options.length]);
   return (
-    <div className="segmented" role="tablist">
+    <div className="segmented" role="tablist" ref={ref}>
+      {thumb && <span className={`seg-thumb ${thumb.ready ? "ready" : ""}`} aria-hidden="true" style={{ width: thumb.w, transform: `translateX(${thumb.x}px)` }} />}
       {options.map((o) => (
         <button key={o.value} role="tab" aria-selected={value === o.value} className={value === o.value ? "on" : ""} onClick={() => onChange(o.value)}>
           {o.label}

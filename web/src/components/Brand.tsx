@@ -16,7 +16,7 @@ const POCKET = ["M131.6 48.0002V39.6002H134.432C135.376 39.6002 136.116 39.8242 
  */
 export function Mark({ size = 32, label, mono = false }: { size?: number; label?: string; mono?: boolean }) {
   return (
-    <svg className="pp-mark" width={size * (32 / 36)} height={size} viewBox="0 0 32 36" fill="none" role={label ? "img" : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
+    <svg className={`pp-mark ${mono ? "mono" : ""}`} width={size * (32 / 36)} height={size} viewBox="0 0 32 36" fill="none" role={label ? "img" : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
       <path d={ICON_SKY} fill={mono ? "currentColor" : SKY} fillOpacity={mono ? 0.5 : undefined} />
       <path d={ICON_LINE} fillRule="evenodd" clipRule="evenodd" fill="currentColor" />
     </svg>

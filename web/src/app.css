@@ -1193,3 +1193,85 @@ select.input { background-image: linear-gradient(45deg, transparent 50%, var(--t
 .input.sm-input { min-height: 36px; padding: 6px 10px; font-size: var(--text-sm); }
 .input.sm-input.qty { width: 52px; }
 .input.sm-input.price { width: 72px; }
+
+/* ------------------------------------ Polish: New agent, segmented, weekly list, order cards ------------------------------------ */
+/* Segmented control: one raised thumb slides between options (iOS), instead of each button lighting up. */
+.segmented { position: relative; isolation: isolate; }
+.segmented button { position: relative; z-index: 1; transition: color 0.2s ease; }
+.segmented button.on { background: transparent; box-shadow: none; color: var(--text); font-weight: 600; }
+.seg-thumb { position: absolute; z-index: 0; top: 3px; bottom: 3px; left: 0; border-radius: var(--radius-pill); background: var(--surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 3px 8px rgba(0, 0, 0, 0.08); pointer-events: none; }
+.seg-thumb.ready { transition: transform 0.42s cubic-bezier(0.32, 0.72, 0, 1), width 0.42s cubic-bezier(0.32, 0.72, 0, 1); }
+@media (prefers-color-scheme: dark) { .seg-thumb { background: color-mix(in srgb, var(--text) 16%, var(--surface-2)); } }
+
+/* New agent: the card it will become, then three quiet step marks */
+.new-agent-hero { gap: 12px; padding: 2px 0 4px; align-items: stretch; }
+.na-card { border-radius: 22px; }
+.na-card .agent-face { height: 116px; padding: 14px 18px; }
+.na-card .face-bottom { display: none; }
+.na-steps { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.na-steps i { width: 18px; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--text-muted) 30%, transparent); transition: background-color 0.3s ease; }
+.na-steps i.done { background: color-mix(in srgb, var(--brand-blue) 55%, transparent); }
+.na-steps i.on { background: var(--brand-blue); }
+.na-steps .caption { margin-left: 6px; min-width: 44px; }
+.na-step { display: flex; flex-direction: column; gap: var(--space-3); animation: na-in 0.36s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes na-in { from { opacity: 0; transform: translate3d(0, 10px, 0); } to { opacity: 1; transform: none; } }
+.na-textarea { resize: none; min-height: 104px; }
+/* Examples in one swipeable row, not a stack of pills */
+.scroll-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); scroll-padding-inline: var(--gutter); }
+.scroll-chips::-webkit-scrollbar { display: none; }
+.scroll-chips .chip { flex: none; white-space: nowrap; min-height: 36px; font-size: 14px; }
+
+/* Weekly list: an inset grouped list with hairlines, a tap-to-change product, a price that reads as money, a stepper */
+.list-editor { max-height: none; overflow: visible; padding-right: 0; }
+.grouped-list { list-style: none; margin: 0; padding: 0; border-radius: 16px; background: var(--surface-2); overflow: hidden; }
+.grouped-list .list-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 14px; border-radius: 0; background: transparent; position: relative; }
+.grouped-list .list-row + .list-row::before { content: ""; position: absolute; top: 0; left: 14px; right: 0; height: 1px; background: var(--border); }
+.lr-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.lr-pick { position: relative; display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.lr-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; }
+.lr-size { flex: none; font-size: var(--text-xs); color: var(--text-muted); }
+.lr-chev { flex: none; color: var(--text-muted); transform: rotate(90deg); align-self: center; }
+/* The native picker sits invisibly on top, so the row reads as text but opens the system list */
+.lr-pick select, .list-add select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 16px; }
+.lr-price { display: flex; align-items: center; gap: 6px; }
+.price-input { display: inline-flex; align-items: center; gap: 1px; height: 26px; padding: 0 8px; border-radius: 8px; background: var(--surface); color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.price-input input { width: 4.2ch; border: 0; padding: 0; background: transparent; color: inherit; font: inherit; font-size: 14px; outline: none; }
+.price-input:focus-within { box-shadow: 0 0 0 2px var(--brand-blue); }
+.stepper { flex: none; display: inline-flex; align-items: center; height: 32px; border-radius: 16px; background: var(--surface); box-shadow: 0 0 0 1px var(--border); }
+.stepper button { width: 34px; height: 32px; display: grid; place-items: center; border: 0; background: transparent; color: var(--text); border-radius: 16px; cursor: pointer; }
+.stepper button:active { transform: scale(0.9); }
+.stepper button:disabled { opacity: 0.35; }
+.stepper button.remove { color: var(--text-muted); }
+.stepper button.remove:active { color: var(--danger); }
+.stepper-n { min-width: 18px; text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; }
+.list-add { color: var(--brand-blue); font-weight: 600; min-height: 48px; }
+.lr-add { display: inline-flex; align-items: center; gap: 8px; }
+
+/* Main actions for weekly / right-now agents: one swipeable row above the message box */
+.composer-actions { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.composer-actions::-webkit-scrollbar { display: none; }
+.composer-actions .chip { flex: none; white-space: nowrap; }
+
+/* Order, pick and in-store cards: amounts as small receipt tiles, the total carrying the weight */
+.order-card { border-radius: 20px; padding: 16px; gap: 12px; }
+.now-card > .headline { font-size: 19px; letter-spacing: -0.01em; }
+.order-head .headline { font-variant-numeric: tabular-nums; }
+.order-card > .caption:first-child, .order-head .caption { letter-spacing: 0.02em; }
+.ask-compare { gap: 8px; flex-wrap: nowrap; }
+.ask-compare > span { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 12px; background: var(--surface-2); }
+.ask-compare > span:last-of-type strong { color: var(--text); }
+.ask-compare > svg { flex: none; color: var(--text-muted); }
+.ask-compare > span.ok-text { background: var(--ok-soft); color: var(--ok); justify-content: center; align-items: center; }
+.ask-card .ask-compare > span { background: var(--surface); }
+.now-card .ask-compare > span:last-child { background: color-mix(in srgb, var(--brand-blue) 12%, var(--surface-2)); }
+.order-line { padding: 10px 0; }
+/* Swipeable rows fade out at the edge, so a cut-off chip reads as "more this way" */
+.composer-actions, .scroll-chips { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+/* Chat bubbles are narrow: the status sits above the order's title instead of squeezing it */
+.order-head { flex-direction: column; align-items: flex-start; gap: 8px; }
+.order-head .badge { order: -1; }
+.order-head .headline { white-space: nowrap; }
+/* The single-colour mark is printed on coloured cards: it takes the card's white in both themes, never the navy logo colour */
+.pp-mark.mono { color: inherit; }
+.peek-card .pp-mark.mono { color: #fff; }
