@@ -1275,3 +1275,33 @@ select.input { background-image: linear-gradient(45deg, transparent 50%, var(--t
 /* The single-colour mark is printed on coloured cards: it takes the card's white in both themes, never the navy logo colour */
 .pp-mark.mono { color: inherit; }
 .peek-card .pp-mark.mono { color: #fff; }
+
+/* ------------------------------------ Agent screen: same glass buttons as everywhere; the aura only while thinking ------------------------------------ */
+/* Back and ⋯ are the same frosted circles as on Agents, at the same size and place. */
+.agent-head .head-btn { margin: 0; }
+.agent-head .head-btn:last-child { justify-self: end; }
+
+/* Retire the always-on edge light: at rest the box is a calm frosted capsule with a neutral shadow. */
+.composer::before, .composer::after { content: none; }
+.composer-body { box-shadow: 0 0 0 0.5px var(--composer-edge), 0 10px 30px -8px rgba(0, 0, 0, 0.22); }
+
+/* The aura: two blurred washes of PayPal blue and violet behind the box, breathing against each other and drifting.
+   It fades in when the agent starts thinking and out when the reply lands. Only opacity and transform animate. */
+.composer-aura { position: absolute; z-index: 0; inset: -6px -4px; pointer-events: none; opacity: 0; transform: scale(0.96);
+  transition: opacity 0.5s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.composer-aura i { position: absolute; inset: 0; border-radius: 34px; filter: blur(22px); will-change: transform, opacity;
+  animation: aura-a 3.2s ease-in-out infinite alternate; animation-play-state: paused; }
+.composer-aura i:first-child { background: linear-gradient(100deg, #00c0fa 0%, #0070e0 45%, #6b5cff 100%); }
+.composer-aura i:last-child { background: linear-gradient(280deg, #00c0fa 0%, #2c5cff 50%, #a35cff 100%); animation-name: aura-b; animation-duration: 4.6s; }
+.composer.is-working .composer-aura { opacity: 0.85; transform: scale(1); }
+.composer.is-working .composer-aura i { animation-play-state: running; }
+@keyframes aura-a { 0% { opacity: 1; transform: translate3d(-10px, 2px, 0) scale(1.02, 1); } 100% { opacity: 0.35; transform: translate3d(10px, -2px, 0) scale(0.98, 1.06); } }
+@keyframes aura-b { 0% { opacity: 0.3; transform: translate3d(12px, -1px, 0) scale(0.98, 1.04); } 100% { opacity: 1; transform: translate3d(-12px, 1px, 0) scale(1.03, 0.98); } }
+/* On white the light is tinted and tighter, so it reads as glow, not a smudge. */
+@media (prefers-color-scheme: light) {
+  .composer-aura { inset: -3px -2px; }
+  .composer-aura i { filter: blur(16px); }
+  .composer.is-working .composer-aura { opacity: 0.55; }
+}
+/* Reduced motion: the aura still appears and disappears, but holds still. */
+@media (prefers-reduced-motion: reduce) { .composer-aura i { animation: none; } }

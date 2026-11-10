@@ -125,7 +125,7 @@ export default function AgentPage({ state, agentId, act, refresh, show, setSheet
       {/* Pinned: Back, the compact identity (fades in once the card scrolls away), Details. */}
       <div className="agent-top" ref={topRef}>
         <header className="agent-head">
-          <button className="icon-btn back-btn" aria-label="Back to agents" onClick={goBack}><Icon name="chevronLeft" size={22} /></button>
+          <button className="glass-circle head-btn" aria-label="Back to agents" onClick={goBack}><Icon name="chevronLeft" size={22} /></button>
           <button className="agent-id" ref={compactRef} onClick={openDetails} aria-label={`${agent.name}. ${doing}. ${money(b.left)} left of ${money(b.total)}. Open details`}>
             <BudgetRing left={b.left} total={b.total} size={44}>
               <AgentIcon name={agent.name} item={m?.item} tone={tone} size={32} paused={agent.paused || !!agent.closedAt} />
@@ -140,7 +140,7 @@ export default function AgentPage({ state, agentId, act, refresh, show, setSheet
               </span>
             </span>
           </button>
-          <button className="icon-btn row-more-head" aria-label={`Details for ${agent.name}`} aria-haspopup="dialog" onClick={openDetails}>
+          <button className="glass-circle head-btn" aria-label={`Details for ${agent.name}`} aria-haspopup="dialog" onClick={openDetails}>
             <Icon name="more" size={22} stroke={3} />
           </button>
         </header>
@@ -359,8 +359,10 @@ function Chat({ state, agent, act, refresh, show, setSheet, busyOuter, decide, o
           <RestoreButton state={state} agentId={agent.id} />
         </div>
       ) : (
-        /* The light hugs the box: 50% at rest, 5% while you type, and travels around the edge while the agent works or listens. */
-        <div className={`composer ${pending ? "is-working" : mic.listening ? "is-listening" : text.trim() ? "is-typing" : ""}`}>
+        /* Calm at rest. While the agent is thinking (a reply, a store check, an order), a soft aura blooms behind the box
+           and drifts until the answer lands. The light is a state, not decoration. */
+        <div className={`composer ${pending || acting ? "is-working" : mic.listening ? "is-listening" : text.trim() ? "is-typing" : ""}`}>
+          <span className="composer-aura" aria-hidden="true"><i /><i /></span>
           <div className="composer-body">
             {paused ? (
               <div className="needs-strip paused" role="status">
