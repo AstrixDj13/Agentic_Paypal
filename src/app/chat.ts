@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Mandate, Pocket } from "../core/types.ts";
 import type { MandateDraft } from "../agent/agents.ts";
 import { recorder } from "./ledger.ts";
+import { notify } from "../intel/push.ts";
 import {
   loadState, type ActiveException, type ChangeScope, type ChatMessage, type DiffRow, type Proposal, type Purchase, type RuleChanges,
 } from "./state.ts";
@@ -14,9 +15,19 @@ import {
 const money = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
 const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 
-export function postMessage(agentId: string, from: ChatMessage["from"], text: string, extra: Partial<ChatMessage> = {}): ChatMessage {
+/**
+ * Few interruptions: a message only buzzes the phone when it's marked `urgent` (something that
+ * can't wait for the weekly check-in, e.g. a stock-out blocking an order). Everything else that
+ * needs the user shows in the agent's chat and on Home, and is bundled into the weekly check-in.
+ */
+export function postMessage(agentId: string, from: ChatMessage["from"], text: string, extra: Partial<ChatMessage> & { urgent?: boolean } = {}): ChatMessage {
   const msg: ChatMessage = { id: `cm_${randomUUID().slice(0, 8)}`, agentId, from, text, at: new Date().toISOString(), ...extra };
   loadState().chats.push(msg);
+  if (extra.urgent && from === "agent") {
+    const name = agentOf(agentId)?.name ?? "Your agent";
+    void notify({ title: name, body: text.slice(0, 180), url: `/agents/${agentId}`, tag: extra.proposalId ?? extra.purchaseId ?? msg.id });
+  }
+  delete (msg as { urgent?: boolean }).urgent;
   return msg;
 }
 
@@ -44,6 +55,8 @@ export function mergeTerms(m: Mandate, c: RuleChanges) {
     maxQuantity: c.maxQuantity && c.maxQuantity >= 1 ? Math.floor(c.maxQuantity) : m.maxQuantity,
     expiresAt: c.expiresAt && !isNaN(Date.parse(c.expiresAt)) ? new Date(c.expiresAt).toISOString() : m.expiresAt,
     avoid: m.avoid ?? [],
+    ...(m.description ? { description: m.description } : {}),
+    ...(m.refImage ? { refImage: m.refImage } : {}),
   };
 }
 
@@ -224,6 +237,7 @@ export function notifyPurchase(p: Purchase, m: Mandate): void {
     postMessage(agent.id, "agent", `Found ${p.title} for ${price}. It fits your rules. ${why} Buy it?`, { purchaseId: p.id, needsYou: true });
     return;
   }
+  if (p.status === "awaiting_look") return; // announced (with photo and buttons) by the look-first step
   if (p.status !== "blocked") return;
 
   const rules = p.decision.violations.map((v) => v.rule);

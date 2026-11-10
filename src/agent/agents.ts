@@ -8,7 +8,7 @@ import { MERCHANT_ID, type Product } from "../store/catalog.ts";
  * 1. Mandate engine: plain words -> structured rules (user approves + signs afterwards)
  * ==================================================================================== */
 
-export type MandateDraft = Pick<Mandate, "item" | "required" | "allowed" | "maxUnitPrice" | "maxQuantity" | "expiresAt"> & { avoid?: string[] };
+export type MandateDraft = Pick<Mandate, "item" | "required" | "allowed" | "maxUnitPrice" | "maxQuantity" | "expiresAt"> & { avoid?: string[]; description?: string; refImage?: string };
 
 const KNOWN_BRANDS = ["nike", "adidas", "puma", "asics", "new balance", "hoka", "brooks", "reebok", "on"];
 
@@ -19,7 +19,8 @@ Today is ${now.toISOString().slice(0, 10)}. Output JSON with keys:
 item (short noun phrase), required (object of exact attribute values; use size_us for US shoe size),
 allowed (object mapping attribute -> array of allowed lowercase values, e.g. {"brand":["nike","adidas"]}),
 maxUnitPrice (number, USD), maxQuantity (integer, default 1), expiresAt (ISO 8601 end of day UTC; default 30 days from today),
-avoid (array of lowercase words the user excluded, e.g. "not paprika" -> ["paprika"]; empty if none).
+avoid (array of lowercase words the user excluded, e.g. "not paprika" -> ["paprika"]; empty if none),
+description (string: every descriptive detail about how the product should look or be, beyond the fields above, e.g. "white leather low-top, gum sole, no visible logo"; empty if none).
 Only include constraints the user actually stated.`,
     instruction,
   );
@@ -41,9 +42,12 @@ export function sanitizeDraft(ai: any, now: Date = new Date()): MandateDraft | n
   }
   const exp = new Date(ai.expiresAt);
   const avoid = (Array.isArray(ai.avoid) ? ai.avoid : ai.avoid ? [ai.avoid] : []).map((x: unknown) => String(x).trim().toLowerCase()).filter(Boolean).slice(0, 10);
+  const description = typeof ai.description === "string" ? ai.description.trim().slice(0, 400) : "";
   return {
     item: String(ai.item),
     avoid,
+    ...(description ? { description } : {}),
+    ...(typeof ai.refImage === "string" && /^[a-f0-9]{32}$/.test(ai.refImage) ? { refImage: ai.refImage } : {}),
     required,
     allowed,
     maxUnitPrice: price,

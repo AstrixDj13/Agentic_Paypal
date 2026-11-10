@@ -60,12 +60,22 @@ export function verifyChain(entries: Entry[]): VerifyResult {
   return { ok: true, checked: entries.length };
 }
 
+/** Where entries are persisted besides memory (e.g. a database table). */
+export interface RecorderSink {
+  onAppend(e: Entry): void;
+  onTamper?(e: Entry): void;
+}
+
 export class FlightRecorder {
   private entries: Entry[] = [];
 
-  /** Pass a .jsonl path to persist across restarts, or omit for in-memory. */
-  constructor(private readonly file?: string) {
-    if (file && existsSync(file)) {
+  /**
+   * Pass a .jsonl path to persist to a file, or `{ entries, sink }` to start from stored rows and
+   * persist each new entry elsewhere (the database). Omit both for in-memory only.
+   */
+  constructor(private readonly file?: string, private readonly opts: { entries?: Entry[]; sink?: RecorderSink } = {}) {
+    if (opts.entries) this.entries = [...opts.entries];
+    else if (file && existsSync(file)) {
       this.entries = readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
     }
   }
@@ -79,6 +89,7 @@ export class FlightRecorder {
     const base = { seq: this.entries.length, ts: now.toISOString(), purchaseId, kind, payload: sealed, prevHash };
     const entry: Entry = { ...base, hash: hashEntry(base) };
     this.entries.push(entry);
+    this.opts.sink?.onAppend(entry);
     if (this.file) appendFileSync(this.file, JSON.stringify(entry) + "\n");
     return entry;
   }
@@ -105,6 +116,7 @@ export class FlightRecorder {
     const e = this.entries[seq];
     if (!e) throw new Error(`No entry ${seq}`);
     mutate(e.payload);
+    this.opts.sink?.onTamper?.(e);
     if (this.file) writeFileSync(this.file, this.entries.map((x) => JSON.stringify(x)).join("\n") + "\n");
   }
 }

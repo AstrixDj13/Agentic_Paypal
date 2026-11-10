@@ -12,6 +12,8 @@ import { loadState, saveState, userKey, type Purchase, type Resolution } from ".
 import { recorder } from "./ledger.ts";
 import { endException, exceptionOf, notifyPurchase, postMessage, proposeRuleChange, sweepExceptions } from "./chat.ts";
 import { AGENT_COLORS } from "./state.ts";
+import { notify } from "../intel/push.ts";
+import { imageFor, record } from "../intel/signals.ts";
 
 /** Orchestrates the buy path (agent -> guard -> PayPal) and the dispute path (photo -> arbiter -> PayPal). */
 
@@ -97,6 +99,8 @@ export function signNewMandate(pocketId: string, instruction: string, rawDraft: 
     currency: "USD",
     maxQuantity: Math.max(1, Number(draft.maxQuantity) || 1),
     ...(draft.avoid?.length ? { avoid: draft.avoid } : {}),
+    ...(draft.description ? { description: draft.description } : {}),
+    ...(draft.refImage ? { refImage: draft.refImage } : {}),
     merchants: [store.MERCHANT_ID],
     expiresAt: draft.expiresAt,
     createdAt: new Date().toISOString(),
@@ -187,10 +191,90 @@ export async function runAgent(mandateId: string, opts: { mode?: agents.AgentMod
   recorder.append(purchase.id, "guard_decision", decision);
   saveState();
 
+  // "Take a look before I buy": hold an in-rules purchase for a moment and ping the phone.
+  const look = Math.max(0, Math.min(3600, Number(pocket.lookFirstSec) || 0));
+  if (decision.outcome === "allow" && look > 0) {
+    purchase.status = "awaiting_look";
+    purchase.lookUntil = new Date(Date.now() + look * 1000).toISOString();
+    const mins = look >= 60 ? `${Math.round(look / 60)} min` : `${look} s`;
+    postMessage(pocket.id, "agent", `Found ${product.title} for $${purchase.total}. It fits your rules. Take a look: I'll buy it in ${mins} unless you skip it.`, { purchaseId: purchase.id, needsYou: true }); // its own push (with photo and buttons) follows
+    void notify({
+      title: `${pocket.name}: take a look before I buy`,
+      body: `${product.title} · $${purchase.total}. Buying in ${mins} unless you skip.`,
+      url: `/agents/${pocket.id}`,
+      image: product.imageUrl,
+      tag: purchase.id,
+      look: { purchaseId: purchase.id },
+    });
+    saveState();
+    return { purchase };
+  }
+
   if (decision.outcome === "allow") await executePurchase(purchase);
   notifyPurchase(purchase, signed.mandate);
   saveState();
   return { purchase };
+}
+
+/* ------------------------------- Take a look before I buy ------------------------------- */
+
+/**
+ * The user's answer to a look-first purchase ("Looks good" / "Skip"), or the timer running out.
+ * Buying re-checks every rule first; skipping is remembered so the agent learns what you don't want.
+ */
+export async function resolveLook(purchaseId: string, decision: "buy" | "skip", by: "user" | "timer" = "user"): Promise<Purchase> {
+  const purchase = purchaseOf(purchaseId);
+  if (purchase.status !== "awaiting_look") throw new UserError("This purchase isn't waiting for a look any more.");
+  const signed = mandateOf(purchase.mandateId);
+  const pocket = pocketOf(purchase.pocketId);
+  const product = store.getProduct(purchase.productId);
+  if (decision === "skip") {
+    purchase.status = "skipped";
+    recorder.append(purchase.id, "guard_decision", { outcome: "block", violations: [{ rule: "skipped_by_user", detail: "You skipped it after taking a look." }], total: purchase.total });
+    record({ source: "app", kind: "skip", title: purchase.title, brand: purchase.order.attributes.brand, price: purchase.order.unitPrice, url: product?.source?.url, imageUrl: product?.imageUrl, agentId: pocket.id });
+    postMessage(pocket.id, "agent", `Skipped ${purchase.title}. Nothing was paid. I'll remember you didn't want it.`);
+    learnFromSkips(pocket.id, signed.mandate, purchase.order.attributes.brand);
+    saveState();
+    return purchase;
+  }
+  const d = checkOrder(signed, purchase.order, pocket, guardState(pocket));
+  purchase.decision = d.outcome === "ask_user" ? { ...d, outcome: "allow", violations: [] } : d;
+  recorder.append(purchase.id, "guard_decision", { ...purchase.decision, lookedAt: by });
+  if (purchase.decision.outcome !== "allow") {
+    purchase.status = "blocked";
+  } else {
+    purchase.status = "completed";
+    if (by === "user") record({ source: "app", kind: "approve", title: purchase.title, brand: purchase.order.attributes.brand, price: purchase.order.unitPrice, agentId: pocket.id });
+    await executePurchase(purchase);
+  }
+  notifyPurchase(purchase, signed.mandate);
+  saveState();
+  return purchase;
+}
+
+/** Runs every few seconds: look-first purchases whose window has passed go ahead (after a fresh rule check). */
+export async function sweepLooks(now = Date.now()) {
+  const due = loadState().purchases.filter((p) => p.status === "awaiting_look" && p.lookUntil && Date.parse(p.lookUntil) <= now);
+  for (const p of due) {
+    try { await resolveLook(p.id, "buy", "timer"); } catch { /* already resolved */ }
+  }
+}
+
+/**
+ * Learning from reactions: after the user skips the same brand twice for an agent, the agent
+ * offers (as a signable proposal) to stop considering that brand. It never drops it on its own.
+ */
+function learnFromSkips(agentId: string, m: Mandate, brand?: string) {
+  if (!brand) return;
+  const b = brand.toLowerCase();
+  const allowed = m.allowed.brand ?? [];
+  if (!allowed.includes(b) || allowed.length < 2) return;
+  const since = Date.now() - 30 * 864e5;
+  const skips = loadState().purchases.filter((p) => p.pocketId === agentId && p.status === "skipped" && p.order.attributes.brand?.toLowerCase() === b && Date.parse(p.createdAt) > since).length;
+  if (skips < 2) return;
+  if (loadState().proposals.some((p) => p.agentId === agentId && p.status === "pending")) return;
+  const prop = proposeRuleChange(agentId, m, { brands: allowed.filter((x) => x !== b) }, "always");
+  if (prop) postMessage(agentId, "agent", `You've skipped ${skips} ${brand} picks. Want me to stop looking at ${brand}?`, { proposalId: prop.id, needsYou: true });
 }
 
 /* ------------------------------- Real products (Channel3) ------------------------------- */
@@ -210,7 +294,7 @@ export async function findAndBuy(mandateId: string, baseUrl: string): Promise<Ru
   const m = mandateOf(mandateId).mandate;
   let real: store.Product[];
   try {
-    real = await channel3.findForRules({ item: m.item, brands: m.allowed.brand ?? [], maxPrice: m.maxUnitPrice, size: m.required.size_us });
+    real = await channel3.findForRules({ item: m.item, brands: m.allowed.brand ?? [], maxPrice: m.maxUnitPrice, size: m.required.size_us, description: m.description, imageDataUrl: imageFor(m.refImage) });
   } catch (e) {
     throw new UserError(`Real-store search failed: ${(e as Error).message}`);
   }
@@ -236,6 +320,7 @@ export async function importRealProducts(query: string, maxPrice?: number): Prom
   if (!channel3.channel3Enabled()) throw new UserError("Real-store search is off (CHANNEL3_API_KEY not set).");
   if (!query.trim()) throw new UserError("Type what to search for.");
   try {
+    record({ source: "search", kind: "search", query, price: maxPrice });
     const raw = await channel3.searchRaw({ query, maxPrice, limit: 6 });
     return store.importProducts(raw.map((r) => channel3.toProduct(r)).filter((p): p is store.Product => !!p));
   } catch (e) {
@@ -263,6 +348,7 @@ export async function approvePurchase(purchaseId: string): Promise<Purchase> {
     return purchase;
   }
   purchase.status = "completed";
+  record({ source: "app", kind: "approve", title: purchase.title, brand: purchase.order.attributes.brand, price: purchase.order.unitPrice, agentId: purchase.pocketId });
   await executePurchase(purchase);
   notifyPurchase(purchase, signed.mandate);
   saveState();
@@ -286,6 +372,8 @@ async function executePurchase(purchase: Purchase): Promise<void> {
     recorder.append(purchase.id, "paypal_capture", { captureId, amount: purchase.total });
     pocketOf(purchase.pocketId).balance = round2(pocketOf(purchase.pocketId).balance - purchase.total);
     purchase.why = await agents.whyLine(mandateOf(purchase.mandateId).mandate, purchase.order);
+    const bought = store.getProduct(purchase.productId);
+    record({ source: "app", kind: "purchase", title: purchase.title, brand: purchase.order.attributes.brand, price: purchase.order.unitPrice, size: purchase.order.attributes.size_us, url: bought?.source?.url, imageUrl: bought?.imageUrl, agentId: purchase.pocketId });
     // A one-time exception is used up by this purchase.
     const ex = exceptionOf(purchase.pocketId);
     if (ex?.scope === "once" && ex.tempMandateId === purchase.mandateId) endException(purchase.pocketId, "used for this purchase");
@@ -312,6 +400,7 @@ export async function reportWrong(purchaseId: string, input: { preset?: string; 
 
   // 1. What actually arrived (vision model or demo preset).
   const delivered = await agents.readDeliveryPhoto(input);
+  record({ source: "app", kind: "dispute", title: purchase.title, brand: purchase.order.attributes.brand, price: purchase.order.unitPrice, size: purchase.order.attributes.size_us, note: input.complaint, agentId: purchase.pocketId });
   recorder.append(purchase.id, "delivery_reading", delivered);
 
   // 2. Merchant agent answers with its own shipping record.

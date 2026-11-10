@@ -20,6 +20,10 @@ export interface Mandate {
   maxQuantity: number;
   /** Words that must not appear in what is bought, e.g. ["paprika"] for "chilli powder, not paprika". */
   avoid?: string[];
+  /** How the user described the product ("white leather low-tops, gum sole"). The agent searches with it. */
+  description?: string;
+  /** sha256 of a reference photo the user attached; the photo itself is stored separately. */
+  refImage?: string;
   /** Merchant ids the agent may buy from. Empty = any agent-ready merchant. */
   merchants: string[];
   expiresAt: string; // ISO
@@ -50,6 +54,8 @@ export interface Pocket {
   askMode?: AskMode;
   /** Per-agent kill switch. */
   paused?: boolean;
+  /** "Take a look before I buy": seconds the agent waits (and pings the phone) before an in-rules purchase. 0 = off. */
+  lookFirstSec?: number;
   /** Closed agents never buy again. Their purchases and records stay. Restoring needs the user's PIN. */
   closedAt?: string;
   /** Chat messages after this time count as unread. */

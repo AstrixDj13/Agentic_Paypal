@@ -9,14 +9,20 @@ import { Toast } from "../components/ui";
  * so the Pocket app reads as "yours" and this reads as "any shop on the web".
  */
 export default function Store() {
-  const { state, refresh } = useAppState(2000);
+  const { state, refresh, error } = useAppState();
   const { toast, show } = useToast();
   const [reveal, setReveal] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [query, setQuery] = useState("Nike running shoes");
   const [agentId, setAgentId] = useState<string>("");
 
-  if (!state) return <div className="store"><p className="store-pad">Loading…</p></div>;
+  if (!state) {
+    return (
+      <div className="store"><p className="store-pad">
+        {error && /sign in/i.test(error) ? <>The demo store runs your own agents, so <a href="/">sign in to Pocket</a> first.</> : "Loading…"}
+      </p></div>
+    );
+  }
   // Which agent the demo buttons send. Defaults to the first agent that has a job.
   const withJobs = state.pockets.filter((p) => !p.closedAt && state.mandates.some((m) => m.mandate.pocketId === p.id));
   const agent = withJobs.find((p) => p.id === agentId) ?? withJobs[0];

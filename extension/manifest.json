@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "PayPal Pocket: shopping memory",
+  "short_name": "Pocket",
+  "version": "0.1.0",
+  "description": "Lets your Pocket agents learn what you shop for: product pages and shopping searches only. Pause or unpair any time.",
+  "icons": { "128": "icon128.png" },
+  "action": { "default_popup": "popup.html", "default_title": "PayPal Pocket", "default_icon": { "128": "icon128.png" } },
+  "background": { "service_worker": "background.js" },
+  "permissions": ["storage"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "incognito": "not_allowed",
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "exclude_matches": [
+        "*://*.paypal.com/*", "*://mail.google.com/*", "*://docs.google.com/*", "*://drive.google.com/*",
+        "*://*.bank/*", "*://*.gov/*", "*://outlook.live.com/*", "*://outlook.office.com/*", "*://*.onedrive.live.com/*",
+        "*://localhost/*", "*://*.onrender.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

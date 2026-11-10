@@ -6,6 +6,7 @@ import { arrive, flyFrom, land, launch, reducedMotion } from "../motion";
 import { SignButton, type Signature } from "../components/lock";
 import { FeedItem, StatusBadge, purchaseApproval, approvePurchaseOrThrow, type Act } from "../components/purchase";
 import { Money, Segmented } from "../components/ui";
+import { LOOK_OPTIONS, LookCard } from "../components/intel";
 import type { SheetState } from "./PocketApp";
 import { RestoreButton } from "../components/agentSheets";
 
@@ -246,6 +247,7 @@ function Chat({ state, agent, act, refresh, show, setSheet, busyOuter, decide, o
   // What needs you, pinned above the composer so it can't scroll away.
   const needs = [
     ...state.purchases.filter((p) => p.pocketId === agent.id && p.status === "needs_approval").map((p) => ({ id: `buy-${p.id}`, label: `Approve ${p.title}` })),
+    ...state.purchases.filter((p) => p.pocketId === agent.id && p.status === "awaiting_look").map((p) => ({ id: `buy-${p.id}`, label: `Take a look: ${p.title}` })),
     ...state.proposals.filter((p) => p.agentId === agent.id && p.status === "pending").map((p) => ({ id: `prop-${p.id}`, label: p.summary })),
   ];
 
@@ -455,9 +457,14 @@ function Message({ m, state, agent, tone, act, busy, decide, setSheet, showAvata
 
 /** A purchase in the conversation: what, how much, how it went, and proof it was checked and recorded. */
 function PurchaseChip({ state, p, act, setSheet }: { state: AppState; p: Purchase; act: Act; setSheet: (s: SheetState) => void }) {
+  // "Take a look before I buy": photo, price, countdown, Looks good / Skip.
+  if (p.status === "awaiting_look") {
+    return <LookCard state={state} p={p} answer={(d) => act(() => api(`/api/purchases/${p.id}/look`, { decision: d }), d === "buy" ? "Buying it now." : "Skipped. Nothing was paid.")} />;
+  }
   const why = p.decision.violations.map((v) => v.detail);
   const check = p.status === "blocked" ? { icon: "shield" as const, tone: "danger", text: why[0] ? `Stopped by your rules: ${why[0]}` : "Stopped by your rules" }
     : p.status === "needs_approval" ? { icon: "hand" as const, tone: "warn", text: why[0] ? `Asking because ${why[0].charAt(0).toLowerCase()}${why[0].slice(1)}` : "Waiting for your approval" }
+    : p.status === "skipped" ? { icon: "close" as const, tone: "warn", text: "You skipped it after a look. Nothing was paid." }
     : p.status === "failed" ? { icon: "alert" as const, tone: "danger", text: p.error ?? "PayPal couldn't complete the payment" }
     : { icon: "check" as const, tone: "ok", text: "Checked against your rules" };
   return (
@@ -618,6 +625,17 @@ function Settings({ state, agent, act, setSheet }: { state: AppState; agent: Poc
           />
           <p className="footnote muted">
             {agent.askMode === "anything" ? "Every purchase waits for your tap, even inside the rules." : "Buys on its own inside the rules. Asks you when money or a limit is involved."}
+          </p>
+        </div>
+        <div className="stack-sm">
+          <span className="headline">Show me before buying</span>
+          <Segmented
+            value={String(agent.lookFirstSec ?? 0)}
+            onChange={(v) => set({ lookFirstSec: Number(v) }, Number(v) ? "You'll get a look before each purchase" : "Look-first is off")}
+            options={LOOK_OPTIONS}
+          />
+          <p className="footnote muted">
+            {agent.lookFirstSec ? `Before each purchase, ${agent.name} sends you the photo and price, then waits ${agent.lookFirstSec >= 60 ? `${Math.round(agent.lookFirstSec / 60)} min` : `${agent.lookFirstSec} s`}. Skip it and nothing is paid.` : "Buys as soon as something fits the rules. Turn this on to get a heads-up first."}
           </p>
         </div>
         <button className="link-row" onClick={() => setSheet({ kind: "rename", id: agent.id })}>

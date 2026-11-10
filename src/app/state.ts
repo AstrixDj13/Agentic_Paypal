@@ -5,8 +5,10 @@ import type { GuardDecision } from "../core/guard.ts";
 import type { ArbiterResult } from "../core/arbiter.ts";
 import type { MandateDraft, MerchantResponse } from "../agent/agents.ts";
 import type { AuthState } from "./auth.ts";
+import { currentEntry, localEntry, markChanged } from "../db/store.ts";
+import { pgEnabled } from "../db/pg.ts";
 
-export type PurchaseStatus = "blocked" | "needs_approval" | "completed" | "failed" | "disputed" | "resolved" | "escalated";
+export type PurchaseStatus = "blocked" | "needs_approval" | "awaiting_look" | "skipped" | "completed" | "failed" | "disputed" | "resolved" | "escalated";
 
 export interface Resolution {
   type: "refund" | "payout" | "mandate_fix" | "review" | "evidence_pack";
@@ -30,6 +32,8 @@ export interface Purchase {
   decision: GuardDecision;
   total: number;
   why?: string;
+  /** "Take a look before I buy": the purchase goes ahead at this time unless the user skips it. */
+  lookUntil?: string;
   paypal?: { orderId: string; captureId?: string; status: string };
   error?: string;
   dispute?: {
@@ -129,22 +133,34 @@ export interface AppState {
 }
 
 const FILE = "data/state.json";
-let state: AppState | null = null;
 
-export function loadState(): AppState {
-  if (state) return state;
+/** File mode (no database): the single local user's state, read once from data/state.json. */
+function loadFile(): AppState {
   mkdirSync("data", { recursive: true });
-  if (existsSync(FILE)) {
-    state = migrate(JSON.parse(readFileSync(FILE, "utf8")) as AppState);
-  } else {
-    state = freshState();
-    saveState();
-  }
-  return state;
+  if (existsSync(FILE)) return migrate(JSON.parse(readFileSync(FILE, "utf8")) as AppState);
+  const fresh = freshState();
+  writeFileSync(FILE, JSON.stringify(fresh, null, 2));
+  return fresh;
+}
+
+/** The signed-in user's entry for this request (PostgreSQL), or the single local user (file mode). */
+function entry() {
+  const e = currentEntry();
+  if (e) return e;
+  if (pgEnabled()) throw new Error("No signed-in user for this request.");
+  return localEntry(loadFile);
+}
+
+/** The current request's user entry (state, recorder, live-update listeners). */
+export const currentUserEntry = () => entry();
+
+/** The current user's state (held in memory; persisted by saveState). */
+export function loadState(): AppState {
+  return entry().state;
 }
 
 /** Older saved state predates agents: give every pocket an identity and add the new collections. */
-function migrate(s: AppState): AppState {
+export function migrate(s: AppState): AppState {
   s.chats ??= [];
   s.proposals ??= [];
   s.exceptions ??= [];
@@ -190,17 +206,28 @@ export function freshState(): AppState {
 }
 
 export function resetState(keepVault = true): AppState {
+  const e = entry();
+  let state: AppState | null = e.state;
   const vault = state?.vault ?? null;
   const auth = state?.auth;
+  // What Pocket learned, paired browsers and notification subscriptions are the user's, not the demo's.
+  const keep = state as (AppState & { intel?: unknown; push?: unknown }) | null;
+  const intel = keep?.intel, push = keep?.push;
   state = freshState();
+  if (intel) (state as AppState & { intel?: unknown }).intel = intel;
+  if (push) (state as AppState & { push?: unknown }).push = push;
   if (keepVault && vault) state.vault = vault;
   if (auth) state.auth = { ...auth, failed: 0, challenge: undefined }; // keep your PIN / Face ID across demo resets
+  e.state = state;
   saveState();
   return state;
 }
 
+/** Persist the current user's state: a debounced write of changed rows (PostgreSQL), or the JSON file. */
 export function saveState(): void {
-  if (state) writeFileSync(FILE, JSON.stringify(state, null, 2));
+  const e = entry();
+  if (!pgEnabled()) writeFileSync(FILE, JSON.stringify(e.state, null, 2));
+  markChanged(e);
 }
 
 export function userKey(): KeyObject {

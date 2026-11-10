@@ -13,6 +13,9 @@ import { loadState, resetState } from "../src/app/state.ts";
 import * as svc from "../src/app/service.ts";
 import * as store from "../src/store/catalog.ts";
 
+// This script drives the services directly as the single local user, so it uses file storage even when DATABASE_URL is set.
+process.env.STORAGE_MODE = "file";
+
 const BASE = "http://localhost:8787";
 const line = (s = "") => console.log(s);
 const money = (n: number) => `$${n.toFixed(2)}`;

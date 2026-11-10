@@ -12,6 +12,8 @@ export interface Pocket {
   color?: string; askMode?: AskMode; paused?: boolean; lastReadAt?: string; createdAt?: string;
   /** Closed agents never buy again; their records stay. */
   closedAt?: string;
+  /** "Take a look before I buy": seconds to wait (and ping the phone) before an in-rules purchase. */
+  lookFirstSec?: number;
 }
 
 export interface DiffRow { label: string; from: string; to: string }
@@ -36,9 +38,13 @@ export interface Mandate {
   maxUnitPrice: number; maxQuantity: number; merchants: string[]; expiresAt: string; createdAt: string;
   /** Words that must never appear in what is bought ("not paprika"). */
   avoid?: string[];
+  /** How the user described the product; the agent searches with it. */
+  description?: string;
+  /** Hash of a reference photo (served at /api/intel/image/:hash). */
+  refImage?: string;
 }
 export interface SignedMandate { mandate: Mandate; publicKey: string; signature: string }
-export type MandateDraft = Pick<Mandate, "item" | "required" | "allowed" | "maxUnitPrice" | "maxQuantity" | "expiresAt" | "avoid">;
+export type MandateDraft = Pick<Mandate, "item" | "required" | "allowed" | "maxUnitPrice" | "maxQuantity" | "expiresAt" | "avoid" | "description" | "refImage">;
 
 export interface ProposedOrder {
   mandateId: string; merchantId: string; productId: string; title: string;
@@ -51,7 +57,9 @@ export type Verdict = "MERCHANT_AT_FAULT" | "AGENT_AT_FAULT" | "INSTRUCTION_UNCL
 
 export interface Purchase {
   id: string; mandateId: string; pocketId: string; productId: string; title: string;
-  status: "blocked" | "needs_approval" | "completed" | "failed" | "disputed" | "resolved" | "escalated";
+  status: "blocked" | "needs_approval" | "awaiting_look" | "skipped" | "completed" | "failed" | "disputed" | "resolved" | "escalated";
+  /** Look-first purchases go ahead at this time unless skipped. */
+  lookUntil?: string;
   mode: "careful" | "naive";
   order: ProposedOrder; snapshot: PageSnapshot;
   decision: { outcome: "allow" | "ask_user" | "block"; violations: Violation[]; total: number };
@@ -105,12 +113,17 @@ export async function api<T = any>(path: string, body?: unknown): Promise<T> {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
+  // Signed out (or the session expired): the app shows the sign-in screen.
+  if (res.status === 401 && data.code === "signin") window.dispatchEvent(new Event("pocket:signin"));
   if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
   return data as T;
 }
 
-/** Polls /api/state so every screen (phone, console, store) stays in sync during the demo. */
-export function useAppState(intervalMs = 2000) {
+/**
+ * Keeps every screen (phone, console, store) in sync. The server pushes "changed" over
+ * server-sent events the moment anything happens; a slow poll is only a fallback.
+ */
+export function useAppState(intervalMs = 15000) {
   const [state, setState] = useState<AppState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const alive = useRef(true);
@@ -125,8 +138,13 @@ export function useAppState(intervalMs = 2000) {
   useEffect(() => {
     alive.current = true;
     refresh();
-    const t = setInterval(refresh, intervalMs);
-    return () => { alive.current = false; clearInterval(t); };
+    const t = setInterval(refresh, Math.max(intervalMs, 10000));
+    let es: EventSource | undefined;
+    try {
+      es = new EventSource("/api/events");
+      es.onmessage = () => refresh();
+    } catch { /* no SSE: the poll keeps things fresh */ }
+    return () => { alive.current = false; clearInterval(t); es?.close(); };
   }, [refresh, intervalMs]);
   return { state, error, refresh };
 }
@@ -155,6 +173,8 @@ export const attrsText = (a: Attributes) => Object.entries(a).map(([k, v]) => `$
 
 export const STATUS_LABEL: Record<Purchase["status"], { text: string; tone: string }> = {
   completed: { text: "Bought", tone: "ok" },
+  awaiting_look: { text: "Take a look", tone: "warn" },
+  skipped: { text: "Skipped", tone: "neutral" },
   blocked: { text: "Stopped", tone: "danger" },
   needs_approval: { text: "Needs approval", tone: "warn" },
   failed: { text: "Payment failed", tone: "danger" },
@@ -186,4 +206,49 @@ export async function fileToDataUrl(file: File, maxSide = 1024): Promise<string>
   canvas.height = Math.round(img.height * scale);
   canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL("image/jpeg", 0.85);
+}
+
+/* ---------------------------- What Pocket knows (behaviour memory) ---------------------------- */
+
+export interface Signal {
+  id: string; at: string; source: "extension" | "share" | "search" | "snap" | "app";
+  kind: "view" | "search" | "cart" | "purchase" | "approve" | "skip" | "decline" | "dispute" | "photo";
+  title?: string; brand?: string; price?: number; url?: string; domain?: string; query?: string; imageUrl?: string; size?: string; dwellMs?: number; note?: string;
+}
+export interface Interest {
+  key: string; label: string; words: string[]; brand?: string; category: string; score: number;
+  views: number; searches: number; dwellMin: number; domains: string[]; imageUrl?: string; priceMin?: number; priceMax?: number; lastAt: string; bought: boolean;
+}
+export interface Profile {
+  sizes: { size: string; count: number; why: string }[];
+  brands: { brand: string; score: number; why: string }[];
+  dislikedBrands: { brand: string; why: string }[];
+  interests: Interest[];
+  priceHabits: { category: string; typical: number; max: number; why: string }[];
+  flexibility?: { overPct: number; why: string };
+  askHint?: { mode: "money" | "anything"; why: string };
+  avoidHints: { word: string; why: string }[];
+  signalCount: number;
+}
+export interface AgentSuggestion { key: string; title: string; why: string; instruction: string; amount: number; imageUrl?: string; domains: string[] }
+export interface IntelView {
+  paused: boolean; signals: Signal[];
+  devices: { id: string; label: string; pairedAt: string; lastSeenAt?: string }[];
+  dismissed: string[]; profile: Profile; suggestions: AgentSuggestion[];
+}
+export interface RuleTip { id: string; text: string; why: string; patch: Partial<MandateDraft> }
+export interface WantResult {
+  item: string; brand?: string; description: string; confidence: number;
+  matches: { title: string; price: number; domain?: string; url?: string; imageUrl?: string; brand?: string }[];
+  instruction: string; amount: number; refImage?: string; source: "photo" | "link";
+}
+/** What a new agent can start from: a suggestion, a photo, or a shared link. */
+export interface AgentPrefill { instruction: string; amount?: number; description?: string; refImage?: string; why?: string }
+
+/** Polls /api/intel (lighter than state; only screens that show it use it). */
+export function useIntel(intervalMs = 5000) {
+  const [intel, setIntel] = useState<IntelView | null>(null);
+  const refresh = useCallback(async () => { try { setIntel(await api<IntelView>("/api/intel")); } catch { /* offline: keep last */ } }, []);
+  useEffect(() => { refresh(); const t = setInterval(refresh, intervalMs); return () => clearInterval(t); }, [refresh, intervalMs]);
+  return { intel, refresh };
 }

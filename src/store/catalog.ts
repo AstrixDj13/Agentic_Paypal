@@ -27,7 +27,13 @@ export interface Product {
   /** Real product photo (Channel3 imports). */
   imageUrl?: string;
   /** Where a real product came from. Absent for the three built-in demo listings. */
-  source?: { kind: "channel3"; productId: string; url: string; domain: string; sizes: string[]; fetchedAt: string };
+  source?: {
+    kind: "channel3"; productId: string; url: string; domain: string; sizes: string[]; fetchedAt: string;
+    /** How well it matches the user's own description (0..1) and which described details it has. */
+    match?: number; matched?: string[];
+    /** Found by the user's reference photo rather than (or as well as) words. */
+    byPhoto?: boolean;
+  };
   /** Demo knob: what the warehouse actually ships for this product. Defaults to the listed attributes. */
   shipsAs?: Attributes;
 }

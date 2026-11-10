@@ -10,6 +10,9 @@ import { draftMandate } from "./service.ts";
 import { recorder } from "./ledger.ts";
 import * as svc from "./service.ts";
 import { loadState, saveState, type ChatMessage, type Proposal } from "./state.ts";
+import { record } from "../intel/signals.ts";
+import { profileSummary } from "../intel/profile.ts";
+import * as store from "../store/catalog.ts";
 
 /**
  * Agents: each pocket is a helper with a name, a colour, its own money and one signed job.
@@ -158,8 +161,15 @@ export function giveJob(agentId: string, instruction: string, draft: MandateDraf
   return signed;
 }
 
-export function updateAgent(agentId: string, patch: { askMode?: AskMode; paused?: boolean; color?: string; name?: string }) {
+export function updateAgent(agentId: string, patch: { askMode?: AskMode; paused?: boolean; color?: string; name?: string; lookFirstSec?: number }) {
   const a = agentOrThrow(agentId);
+  if (patch.lookFirstSec !== undefined) {
+    const sec = Math.max(0, Math.min(3600, Math.round(Number(patch.lookFirstSec) || 0)));
+    if (sec !== (a.lookFirstSec ?? 0)) {
+      a.lookFirstSec = sec;
+      postMessage(a.id, "system", sec ? `Setting changed: I'll show you each purchase ${sec >= 60 ? `${Math.round(sec / 60)} min` : `${sec} s`} before buying, so you can skip it.` : "Setting changed: I'll buy within the rules without waiting for a look.");
+    }
+  }
   if (patch.askMode && patch.askMode !== a.askMode) {
     a.askMode = patch.askMode === "anything" ? "anything" : "money";
     postMessage(a.id, "system", a.askMode === "anything" ? "Setting changed: ask me about anything. I'll check with you before every purchase." : "Setting changed: only ask about money. I'll buy inside my rules on my own.");
@@ -208,6 +218,7 @@ export async function chat(agentId: string, text: string, baseUrl: string): Prom
     others: s.pockets.filter((p) => p.id !== agentId && !p.closedAt),
     history,
     realStores: channel3Enabled(),
+    profile: profileSummary(),
   });
 
   // The model only suggests. Here plain code turns a suggestion into a signable card, or says why not.
@@ -289,6 +300,9 @@ export async function approveProposal(id: string, baseUrl: string) {
 
 export function declineProposal(id: string) {
   const p = proposalOrThrow(id);
+  // Saying no to an item is worth remembering (an exception for a specific product, not a general rule tweak).
+  const product = p.retryProductId ? store.getProduct(p.retryProductId) : undefined;
+  if (product) record({ source: "app", kind: "decline", title: product.title, brand: product.attributes.brand, price: product.unitPrice, url: product.source?.url, imageUrl: product.imageUrl, agentId: p.agentId });
   p.status = "declined";
   p.decidedAt = new Date().toISOString();
   recorder.append(p.agentId, "proposal_decision", { proposalId: p.id, status: "declined", summary: p.summary });

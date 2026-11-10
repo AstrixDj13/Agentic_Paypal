@@ -2,8 +2,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   api, attrsText, fileToDataUrl, money, PRESET_LABEL, useAppState, useToast, when,
-  type AppState, type FindResult, type Purchase,
+  type AgentPrefill, type AppState, type FindResult, type Purchase, type WantResult,
 } from "../api";
+import { KnowsPage, LookCard, NoticedCard, SharePage, WantSheet, useSnap } from "../components/intel";
 import { BrandLockup, Mark } from "../components/Brand";
 import { Icon, type IconName } from "../components/Icon";
 import { FeedItem, MandateChips, Receipt, StatusBadge, VerdictCard, purchaseApproval, approvePurchaseOrThrow, type Act } from "../components/purchase";
@@ -14,13 +15,15 @@ import { SPRING, reducedMotion, launch, land, flyFrom } from "../motion";
 import { AgentCardFace, AgentIcon, BudgetBar, activeMandate, budgetOf, cardStats, pendingFor, toneOf, unreadFor } from "../components/agent";
 import { AgentMenu, CloseAgent, DeleteAgent, JobSheet, MoveMoney, NewAgent, RenameAgent } from "../components/agentSheets";
 import { LockScreen, SignButton, SignerProvider } from "../components/lock";
+import { AccountScreen, signOut } from "../components/account";
 
 const UNLOCK_KEY = "pocket.unlocked";
 const readUnlocked = () => { try { return sessionStorage.getItem(UNLOCK_KEY) === "1"; } catch { return false; } };
 
-type Tab = "home" | "agents" | "agent" | "activity" | "blackbox";
+type Tab = "home" | "agents" | "agent" | "activity" | "blackbox" | "knows" | "share";
 export type SheetState =
-  | { kind: "agent" }
+  | { kind: "agent"; prefill?: AgentPrefill }
+  | { kind: "want"; result: WantResult; photo?: string }
   | { kind: "job"; id: string }
   | { kind: "move"; id: string }
   | { kind: "rename"; id: string }
@@ -41,9 +44,10 @@ const TABS: { tab: Tab; path: string; label: string; icon: IconName }[] = [
   { tab: "blackbox", path: "/console", label: "Black Box", icon: "box" },
 ];
 
-const TAB_TITLE: Record<Tab, string> = { home: "Pocket", agents: "Agents", agent: "", activity: "Activity", blackbox: "Black Box" };
+const TAB_TITLE: Record<Tab, string> = { home: "Pocket", agents: "Agents", agent: "", activity: "Activity", blackbox: "Black Box", knows: "What Pocket knows", share: "Pocket" };
 
 const tabFromPath = (p: string): Tab =>
+  p.startsWith("/knows") ? "knows" : p.startsWith("/share") ? "share" :
   p.startsWith("/console") ? "blackbox" : /^\/agents\/?$/.test(p) ? "agents" : p.startsWith("/agents/") ? "agent" : p.startsWith("/activity") ? "activity" : "home";
 
 /**
@@ -153,13 +157,33 @@ export default function PocketApp() {
   const mainRef = useRef<HTMLElement>(null);
   const [sheet, setSheet] = useState<SheetState>(null);
   const close = useCallback(() => setSheet(null), []);
+  // Intelligence: start an agent from a suggestion, a photo or a shared link.
+  const makeAgent = useCallback((prefill: AgentPrefill) => setSheet({ kind: "agent", prefill }), []);
+  const snap = useSnap((result, photo) => setSheet({ kind: "want", result, photo }), (t, e) => show(t, e));
+  const onShared = useCallback((result: WantResult) => setSheet({ kind: "want", result }), []);
+  const shareDone = useCallback(() => navigate("/", { replace: true }), [navigate]);
+
+  // Account first (email + password), then the PIN pad. Without a database there is one local user and no sign-in.
+  const [account, setAccount] = useState<{ status: "checking" | "signin" | "ok"; email?: string | null; mode?: string }>({ status: "checking" });
+  useEffect(() => {
+    api<{ mode: string; user: { email: string | null } | null }>("/api/account/me")
+      .then((r) => setAccount(r.user ? { status: "ok", email: r.user.email, mode: r.mode } : { status: "signin", mode: r.mode }))
+      .catch(() => setAccount({ status: "ok" }));
+    const onSignin = () => {
+      try { sessionStorage.removeItem(UNLOCK_KEY); } catch { /* storage blocked */ }
+      setAccount((a) => ({ ...a, status: "signin" }));
+      setLock("checking");
+    };
+    window.addEventListener("pocket:signin", onSignin);
+    return () => window.removeEventListener("pocket:signin", onSignin);
+  }, []);
 
   // App lock: PIN pad on open (create a PIN the first time). Stays unlocked for this tab session.
   const [lock, setLock] = useState<"checking" | "setup" | "unlock" | "open">(readUnlocked() ? "open" : "checking");
   useEffect(() => {
-    if (lock !== "checking") return;
+    if (lock !== "checking" || account.status !== "ok") return;
     api<{ hasPin: boolean }>("/api/auth/status").then((s) => setLock(s.hasPin ? "unlock" : "setup")).catch(() => setLock("unlock"));
-  }, [lock]);
+  }, [lock, account.status]);
   const unlocked = () => {
     try { sessionStorage.setItem(UNLOCK_KEY, "1"); } catch { /* private mode: unlock for this view only */ }
     setLock("open");
@@ -216,8 +240,17 @@ export default function PocketApp() {
   return (
     <div className="stage">
       <div className={`device ${state?.killSwitch ? "paused" : ""} ${tab === "agent" ? "in-agent" : ""} ${sheet ? "sheet-open" : ""}`}>
-        {(lock === "setup" || lock === "unlock") && <LockScreen mode={lock} onDone={unlocked} />}
-        {lock === "checking" && <div className="lock splash"><span className="lock-mark"><Mark size={44} /></span></div>}
+        {account.status === "signin" && (
+          <AccountScreen onDone={(u) => {
+            try { sessionStorage.removeItem(UNLOCK_KEY); } catch { /* storage blocked */ }
+            setLock("checking");
+            setAccount({ status: "ok", email: u.email, mode: "accounts" });
+            refresh();
+            if (u.imported) show("Your existing agents and Black Box were moved into this account.");
+          }} />
+        )}
+        {account.status === "ok" && (lock === "setup" || lock === "unlock") && <LockScreen mode={lock} onDone={unlocked} />}
+        {(account.status === "checking" || (account.status === "ok" && lock === "checking")) && <div className="lock splash"><span className="lock-mark"><Mark size={44} /></span></div>}
         <SignerProvider>
         {/* Compact bar: appears once the page scrolls. The full logo scrolls away with Home's content. */}
         {tab !== "agent" && (
@@ -238,7 +271,9 @@ export default function PocketApp() {
           ) : (
             <>
               {/* Home stays mounted under the Agents layer, so going back is instant and the slide can reveal it. */}
-              {(tab === "home" || tab === "agents") && <Home state={state} act={act} setSheet={setSheet} toggleKill={toggleKill} goActivity={(f) => navigate(f ? `/activity?f=${f}` : "/activity")} openAgent={openAgent} goAgents={goAgents} goBlackBox={() => navigate("/console")} />}
+              {(tab === "home" || tab === "agents") && <Home state={state} act={act} setSheet={setSheet} toggleKill={toggleKill} goActivity={(f) => navigate(f ? `/activity?f=${f}` : "/activity")} openAgent={openAgent} goAgents={goAgents} goBlackBox={() => navigate("/console")} makeAgent={makeAgent} openKnows={() => navigate("/knows")} snap={snap.open} accountEmail={account.mode === "accounts" ? account.email : null} />}
+              {tab === "knows" && <KnowsPage back={() => navigate("/")} onUse={makeAgent} onSnap={snap.open} show={show} />}
+              {tab === "share" && <SharePage onResult={onShared} show={show} done={shareDone} />}
               {tab === "agent" && <AgentPage state={state} agentId={agentId} act={act} refresh={refresh} show={show} setSheet={setSheet} back={() => navigate("/agents")} />}
               {tab === "activity" && <Activity key={search} initial={(new URLSearchParams(search).get("f") as Filter) ?? "all"} state={state} setSheet={setSheet} />}
               {tab === "blackbox" && <BlackBox state={state} show={show} openEvidence={(id) => setSheet({ kind: "evidence", id })} />}
@@ -267,7 +302,8 @@ export default function PocketApp() {
 
         {state && sheet && (
           <Sheet onClose={close} key={sheet.kind + ("id" in sheet ? sheet.id : "")}>
-            {sheet.kind === "agent" && <NewAgent state={state} act={act} close={close} open={openAgent} />}
+            {sheet.kind === "agent" && <NewAgent state={state} act={act} close={close} open={openAgent} prefill={sheet.prefill} />}
+            {sheet.kind === "want" && <WantSheet result={sheet.result} photo={sheet.photo} onMake={makeAgent} />}
             {sheet.kind === "job" && <JobSheet state={state} agentId={sheet.id} act={act} close={close} />}
             {sheet.kind === "move" && <MoveMoney state={state} agentId={sheet.id} act={act} close={close} />}
             {sheet.kind === "rename" && <RenameAgent state={state} agentId={sheet.id} close={close} show={show} refresh={refresh} />}
@@ -282,6 +318,7 @@ export default function PocketApp() {
           </Sheet>
         )}
         <Toast toast={toast} />
+        {snap.el}
         </SignerProvider>
       </div>
     </div>
@@ -290,10 +327,13 @@ export default function PocketApp() {
 
 /* ====================================== Home ====================================== */
 
-function Home({ state, act, setSheet, toggleKill, goActivity, openAgent, goAgents, goBlackBox }: {
+function Home({ state, act, setSheet, toggleKill, goActivity, openAgent, goAgents, goBlackBox, makeAgent, openKnows, snap, accountEmail }: {
   state: AppState; act: Act; setSheet: (s: SheetState) => void; toggleKill: () => void; goActivity: (filter?: string) => void;
   openAgent: (id: string) => void; goAgents: () => void; goBlackBox: () => void;
+  makeAgent: (p: AgentPrefill) => void; openKnows: () => void; snap: () => void;
+  accountEmail?: string | null;
 }) {
+  const looks = state.purchases.filter((p) => p.status === "awaiting_look");
   const open = state.pockets.filter((p) => !p.closedAt);
   const total = open.reduce((s, p) => s + p.balance, 0);
   const paused = state.killSwitch;
@@ -373,6 +413,9 @@ function Home({ state, act, setSheet, toggleKill, goActivity, openAgent, goAgent
           <Icon name="chevronRight" size={18} className="muted" />
         </button>
       )}
+      {looks.map((p) => (
+        <LookCard key={p.id} state={state} p={p} answer={(d) => act(() => api(`/api/purchases/${p.id}/look`, { decision: d }), d === "buy" ? "Buying it now." : "Skipped. Nothing was paid.")} />
+      ))}
       {suggesting.map((a) => (
         <button key={a.id} className="card action-row hero-glass" onClick={() => openAgent(a.id)}>
           <AgentIcon name={a.name} item={activeMandate(state, a.id)?.mandate.item} tone={toneOf(a, activeMandate(state, a.id)?.mandate.item)} size={36} />
@@ -419,7 +462,14 @@ function Home({ state, act, setSheet, toggleKill, goActivity, openAgent, goAgent
         </div>
       )}
 
+      <NoticedCard onUse={makeAgent} onOpenKnows={openKnows} onSnap={snap} />
+
       <p className="trust-note"><Icon name="shield" size={16} />Agents can only spend what's in their own pocket. Your PayPal balance and cards are never shared with them.</p>
+      {accountEmail && (
+        <p className="account-note caption muted">
+          Signed in as {accountEmail} · <button className="link-btn" onClick={signOut}>Sign out</button>
+        </p>
+      )}
     </>
   );
 }

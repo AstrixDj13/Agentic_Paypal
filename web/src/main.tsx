@@ -5,11 +5,14 @@ import "./tokens.css";
 import "./app.css";
 import PocketApp from "./pages/PocketApp";
 import Store from "./pages/Store";
+import { registerServiceWorker } from "./push";
+
+registerServiceWorker();
 
 /**
  * Mobile-first everywhere.
  *  /store       Stride Supply, the demo merchant (separate, unbranded site)
- *  everything   PayPal Pocket app: / (Home), /rules, /activity, /console (Black Box)
+ *  everything   PayPal Pocket app: / (Home), /agents, /activity, /console (Black Box), /knows, /share
  */
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

@@ -16,6 +16,8 @@ const STATUS_ICON: Record<Purchase["status"], IconName> = {
   completed: "check",
   blocked: "hand",
   needs_approval: "clock",
+  awaiting_look: "eye",
+  skipped: "close",
   failed: "alert",
   disputed: "eye",
   resolved: "undo",

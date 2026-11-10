@@ -1107,3 +1107,50 @@ select.input { background-image: linear-gradient(45deg, transparent 50%, var(--t
 .budget-ring .agent-icon.mono { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25); }
 /* The issuer's mark on the card, printed in white like the logo on Apple Card */
 .face-emblem { color: #fff; filter: none; opacity: 0.95; width: 30px; justify-content: start; }
+/* ------------------------------------ Intelligence: look-first, suggestions, what Pocket knows ------------------------------------ */
+.divider { height: 1px; background: var(--border); margin: 4px 0; }
+.look-ph { flex: none; width: 56px; height: 56px; border-radius: 14px; display: grid; place-items: center; background: var(--surface-2); color: var(--text-muted); }
+
+.look-card { display: flex; flex-direction: column; gap: 12px; padding: 14px; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-md); border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--border)); }
+.look-top { display: flex; gap: 12px; align-items: flex-start; }
+.look-top img { flex: none; width: 72px; height: 72px; border-radius: 14px; object-fit: contain; background: #fff; border: 1px solid var(--border); }
+.look-timer { display: flex; flex-direction: column; gap: 6px; }
+.look-bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.look-bar i { display: block; height: 100%; background: var(--warn); transform-origin: left center; transition: transform 0.5s linear; }
+
+.suggest-card { display: flex; gap: 12px; align-items: flex-start; padding: 14px; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-sm); border: 1px solid var(--border); }
+.suggest-card img { flex: none; width: 64px; height: 64px; border-radius: 14px; object-fit: contain; background: #fff; border: 1px solid var(--border); }
+.suggest-card.compact { padding: 10px; box-shadow: none; background: var(--surface-2); border-color: transparent; }
+.suggest-card.compact img, .suggest-card.compact .look-ph { width: 48px; height: 48px; }
+.suggest-empty { display: flex; align-items: center; gap: 12px; width: 100%; font: inherit; color: inherit; text-align: left; }
+
+.want-hero { display: flex; gap: 14px; align-items: center; }
+.want-hero img { flex: none; width: 96px; height: 96px; border-radius: 18px; object-fit: cover; background: #fff; border: 1px solid var(--border); }
+.ref-thumb { width: 44px; height: 44px; border-radius: 10px; object-fit: cover; border: 1px solid var(--border); flex: none; }
+.textarea.short { min-height: 72px; }
+
+.tips { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: var(--radius-lg); background: color-mix(in srgb, var(--brand-blue) 6%, var(--surface)); border: 1px dashed color-mix(in srgb, var(--brand-blue) 30%, var(--border)); }
+.tip { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 12px; background: var(--surface); color: inherit; font: inherit; cursor: pointer; }
+.tip:active { transform: scale(0.99); }
+
+.knows .card { box-shadow: var(--shadow-sm); }
+.know-row { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; }
+.know-row + .know-row { border-top: 1px solid var(--border); padding-top: 10px; }
+.know-row svg { margin-top: 2px; flex: none; }
+.interest { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-sm); }
+.interest img, .interest .look-ph { flex: none; width: 44px; height: 44px; border-radius: 12px; object-fit: contain; background: #fff; border: 1px solid var(--border); }
+.signal-row { display: flex; gap: 10px; align-items: flex-start; }
+.signal-row + .signal-row { border-top: 1px solid var(--border); padding-top: 8px; }
+.signal-row svg { margin-top: 3px; flex: none; }
+.signal-row .icon-btn, .interest .icon-btn { width: 32px; height: 32px; flex: none; background: transparent; color: var(--text-muted); }
+.pair-code { display: inline-flex; gap: 6px; align-items: baseline; margin-top: 6px; padding: 8px 12px; border-radius: 12px; background: var(--surface-2); font-size: var(--text-sm); }
+.pair-code strong { font-family: var(--font-mono); font-size: 20px; letter-spacing: 0.18em; }
+.suggest-card .btn { white-space: nowrap; }
+.suggest-card .row { flex-wrap: wrap; }
+
+/* ------------------------------------ Account (sign in) ------------------------------------ */
+.account-screen { justify-content: center; gap: 4px; }
+.account-form { width: 100%; max-width: 340px; display: flex; flex-direction: column; gap: 12px; margin-top: 18px; }
+.account-form .field { color: var(--text-muted); }
+.account-note { text-align: center; }
+.account-note .link-btn { font: inherit; }

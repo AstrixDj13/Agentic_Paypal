@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { api, money, type AppState, type AskMode, type MandateDraft, type Pocket } from "../api";
+import { api, money, useIntel, type AgentPrefill, type AppState, type AskMode, type MandateDraft, type Pocket } from "../api";
+import { DescribeFields, RuleTips, SuggestionCard } from "./intel";
 import { Icon } from "./Icon";
 import { AGENT_COLORS, AgentIcon, PALETTE, activeMandate, agentTone, limitsLine, suggestPocketName, toneOf } from "./agent";
 import { SignButton, useSigner, type Signature } from "./lock";
@@ -39,6 +40,8 @@ export function RuleReview({ draft, setDraft, source }: { draft: MandateDraft; s
       </div>
       <label className="field">Never buy (optional)<input className="input" value={(draft.avoid ?? []).join(", ")} placeholder="e.g. paprika" onChange={(e) => set({ avoid: e.target.value.split(",").map((w) => w.trim().toLowerCase()).filter(Boolean) })} /></label>
       <label className="field">Expires<input className="input" type="date" value={draft.expiresAt.slice(0, 10)} onChange={(e) => e.target.value && set({ expiresAt: new Date(`${e.target.value}T23:59:59Z`).toISOString() })} /></label>
+      <DescribeFields draft={draft} set={set} />
+      <RuleTips draft={draft} apply={set} />
       <MandateChips m={draft} />
       <p className="footnote muted">These rules are checked at checkout, before anything is paid.</p>
     </div>
@@ -50,12 +53,12 @@ function useDraft() {
   const [source, setSource] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const read = async (instruction: string) => {
+  const read = async (instruction: string, keep?: Pick<MandateDraft, "description" | "refImage">) => {
     setBusy(true);
     setErr(null);
     try {
       const r = await api<{ draft: MandateDraft; source: string }>("/api/mandates/draft", { instruction });
-      setDraft(r.draft);
+      setDraft({ ...r.draft, ...(keep?.description ? { description: keep.description } : {}), ...(keep?.refImage ? { refImage: keep.refImage } : {}) });
       setSource(r.source);
       return true;
     } catch (e) {
@@ -83,12 +86,15 @@ const focusAfterSheet = (el: HTMLInputElement | null) => {
 };
 
 /** 1 money → 2 job in your words → 3 check the rules, name (suggested from the job), when it asks, approve. */
-export function NewAgent({ state, act, close, open }: { state: AppState; act: Act; close: () => void; open: (id: string) => void }) {
+export function NewAgent({ state, act, close, open, prefill }: { state: AppState; act: Act; close: () => void; open: (id: string) => void; prefill?: AgentPrefill }) {
   const [step, setStep] = useState(1);
   const [name, setName] = useState<string | null>(null); // null = use the suggestion
   const color = AGENT_COLORS[0]; // stored for older clients; the UI doesn't colour-code agents
-  const [amount, setAmount] = useState("150");
-  const [instruction, setInstruction] = useState(EXAMPLES[0]);
+  const [amount, setAmount] = useState(String(prefill?.amount ?? 150));
+  const [instruction, setInstruction] = useState(prefill?.instruction ?? EXAMPLES[0]);
+  const [keep, setKeep] = useState<Pick<MandateDraft, "description" | "refImage">>({ description: prefill?.description, refImage: prefill?.refImage });
+  const { intel, refresh: refreshIntel } = useIntel(30000);
+  const ideas = (intel?.suggestions ?? []).slice(0, 2);
   const [askMode, setAskMode] = useState<AskMode>("money");
   const d = useDraft();
   const suggested = suggestPocketName(d.draft?.item, state.pockets.map((p) => p.name));
@@ -114,6 +120,7 @@ export function NewAgent({ state, act, close, open }: { state: AppState; act: Ac
 
       {step === 1 && (
         <>
+          {prefill?.why && <p className="footnote muted row" style={{ gap: 6 }}><Icon name="sparkles" size={14} />Suggested because: {prefill.why.charAt(0).toLowerCase() + prefill.why.slice(1)}</p>}
           <p className="subhead muted">How much can this agent spend? It can't spend more than this.</p>
           <div className="amount-input"><span>$</span><input className="input big" ref={focusAfterSheet} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} aria-label="Amount in US dollars" /></div>
           <div className="chips">
@@ -127,11 +134,23 @@ export function NewAgent({ state, act, close, open }: { state: AppState; act: Ac
         <>
           <p className="subhead muted">What should it buy? Describe it in your own words, with your limits.</p>
           <textarea className="input textarea" value={instruction} onChange={(e) => setInstruction(e.target.value)} aria-label="The job in your words" />
-          <div className="chips">{EXAMPLES.slice(1).map((x) => <button key={x} className="chip btnlike" onClick={() => setInstruction(x)}>{x.split(",")[0]}</button>)}</div>
+          {keep.refImage && <p className="footnote muted row" style={{ gap: 8 }}><img className="ref-thumb" src={`/api/intel/image/${keep.refImage}`} alt="" />Your photo will be used to search too.</p>}
+          {!prefill && ideas.length > 0 ? (
+            <div className="stack-sm">
+              <span className="caption muted row" style={{ gap: 6 }}><Icon name="sparkles" size={14} />Based on what you've been looking at</span>
+              {ideas.map((s) => (
+                <SuggestionCard key={s.key} s={s} compact
+                  onUse={(p) => { setInstruction(p.instruction); if (p.amount) setAmount(String(p.amount)); setKeep({}); }}
+                  onDismiss={async () => { await api("/api/intel/dismiss", { key: s.key }); refreshIntel(); }} />
+              ))}
+            </div>
+          ) : (
+            <div className="chips">{EXAMPLES.slice(1).map((x) => <button key={x} className="chip btnlike" onClick={() => setInstruction(x)}>{x.split(",")[0]}</button>)}</div>
+          )}
           {d.err && <p className="footnote danger-text">{d.err}</p>}
           <div className="row" style={{ gap: 8 }}>
             <button className="btn ghost" onClick={() => setStep(1)}>Back</button>
-            <button className="btn primary grow" disabled={d.busy || !instruction.trim()} onClick={async () => { if (await d.read(instruction)) setStep(3); }}>
+            <button className="btn primary grow" disabled={d.busy || !instruction.trim()} onClick={async () => { if (await d.read(instruction, keep)) setStep(3); }}>
               {d.busy ? <><span className="spinner" />Creating rules…</> : "Create rules"}
             </button>
           </div>
