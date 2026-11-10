@@ -13,6 +13,9 @@ import { loadState, saveState, type ChatMessage, type Proposal } from "./state.t
 import { record } from "../intel/signals.ts";
 import { profileSummary } from "../intel/profile.ts";
 import * as store from "../store/catalog.ts";
+import { buildWeeklyOrder, listFromInput } from "../grocery/routine.ts";
+import { findNow } from "../grocery/now.ts";
+import type { AgentKind } from "../core/types.ts";
 
 /**
  * Agents: each pocket is a helper with a name, a colour, its own money and one signed job.
@@ -97,6 +100,10 @@ export function deleteAgent(agentId: string) {
 /* ------------------------------------ Create & settings ------------------------------------ */
 
 export interface NewAgent {
+  kind?: AgentKind;
+  /** Routine agents: the weekly list ({ productId, qty, usualPrice }) and the weekly budget. */
+  list?: unknown;
+  weeklyBudget?: number;
   /** Optional: when blank, the agent is named after its job ("Shoe pocket"). */
   name?: string;
   color?: string;
@@ -132,10 +139,24 @@ function assertNameFree(name: string, exceptId?: string) {
 
 /** Name, money, and the one job: created and signed in one step. */
 export function createAgent(input: NewAgent) {
+  if (input.kind === "routine") {
+    // The weekly list is validated and priced here, then signed like any other rule.
+    const list = listFromInput(input.list);
+    const usual = list.reduce((t, i) => t + i.usualPrice * i.qty, 0);
+    const budget = Number(input.weeklyBudget) > 0 ? Number(input.weeklyBudget) : Math.ceil(usual * 1.15);
+    input.instruction = input.instruction?.trim() || `Weekly groceries: ${list.length} items, up to $${budget} a week`;
+    input.draft = {
+      item: "weekly groceries", required: {}, allowed: {}, maxUnitPrice: budget, maxQuantity: 1,
+      expiresAt: new Date(Date.now() + 365 * 864e5).toISOString(), kind: "routine", list, merchants: ["grocery"],
+      avoid: input.draft?.avoid ?? [],
+    };
+  }
   if (!input.instruction?.trim() || !input.draft) throw new UserError("Give your agent a job first.");
   const name = input.name?.trim() ? input.name.trim().slice(0, 24) : pocketNameFor(input.draft.item, loadState().pockets.map((p) => p.name));
   assertNameFree(name);
   const agent = svc.createPocket(name, Number(input.amount), { color: input.color, askMode: input.askMode });
+  agent.kind = input.draft.kind ?? "hunt";
+  if (agent.kind === "hunt") agent.checkNearby = true;
   try {
     const signed = svc.signNewMandate(agent.id, input.instruction, input.draft);
     const m = signed.mandate;
@@ -161,8 +182,15 @@ export function giveJob(agentId: string, instruction: string, draft: MandateDraf
   return signed;
 }
 
-export function updateAgent(agentId: string, patch: { askMode?: AskMode; paused?: boolean; color?: string; name?: string; lookFirstSec?: number }) {
+export function updateAgent(agentId: string, patch: { askMode?: AskMode; paused?: boolean; color?: string; name?: string; lookFirstSec?: number; checkNearby?: boolean; autoSwapCheaper?: boolean; orderDeadlineSec?: number }) {
   const a = agentOrThrow(agentId);
+  if (typeof patch.checkNearby === "boolean") a.checkNearby = patch.checkNearby;
+  if (typeof patch.autoSwapCheaper === "boolean") {
+    a.prefs ??= {};
+    a.prefs.autoSwapCheaper = patch.autoSwapCheaper;
+    postMessage(a.id, "system", patch.autoSwapCheaper ? "Rule added: swap automatically when it's cheaper and the same size. Anything that costs more still asks you." : "I'll ask before every swap again.");
+  }
+  if (patch.orderDeadlineSec !== undefined) { a.prefs ??= {}; a.prefs.orderDeadlineSec = Math.max(30, Math.min(7 * 86400, Math.round(Number(patch.orderDeadlineSec) || 120))); }
   if (patch.lookFirstSec !== undefined) {
     const sec = Math.max(0, Math.min(3600, Math.round(Number(patch.lookFirstSec) || 0)));
     if (sec !== (a.lookFirstSec ?? 0)) {
@@ -250,7 +278,9 @@ export async function chat(agentId: string, text: string, baseUrl: string): Prom
   let found: unknown;
   // Never act while a card is waiting for the user's signature: it would bury the card.
   if (proposal) return { messages: loadState().chats.slice(before), action: "none" };
-  if (out.action === "check_store" && signed) await svc.runAgent(signed.mandate.id, { mode: "careful", baseUrl });
+  if (out.action === "check_store" && signed) {
+    try { await checkNow(agentId, baseUrl); } catch (e) { postMessage(agentId, "agent", (e as Error).message); saveState(); }
+  }
   if (out.action === "find_real" && signed && channel3Enabled()) {
     try { found = await svc.findAndBuy(signed.mandate.id, baseUrl); } catch (e) { postMessage(agentId, "agent", (e as Error).message); saveState(); }
   }
@@ -365,10 +395,12 @@ export function transfer(fromId: string, toId: string, amount: number, via = "ap
   return { id, from, to, amount: amt };
 }
 
-/** "Check the store now" from the agent page. */
+/** "Check the store now" from the agent page: a hunt searches the store, a routine prepares this week's order, a right-now agent picks a meal. */
 export async function checkNow(agentId: string, baseUrl: string) {
   const signed = activeMandateOf(openAgentOrThrow(agentId).id);
   if (!signed) throw new UserError("Give this agent a job first.");
+  if (signed.mandate.kind === "routine") return { order: buildWeeklyOrder(agentId) };
+  if (signed.mandate.kind === "now") return { order: findNow(agentId) };
   return svc.runAgent(signed.mandate.id, { mode: "careful", baseUrl });
 }
 

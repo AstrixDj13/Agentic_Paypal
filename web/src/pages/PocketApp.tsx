@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
-  api, attrsText, fileToDataUrl, money, PRESET_LABEL, useAppState, useToast, when,
+  api, attrsText, fileToDataUrl, money, PRESET_LABEL, savedThisMonth, useAppState, useToast, when,
   type AgentPrefill, type AppState, type FindResult, type Purchase, type WantResult,
 } from "../api";
 import { KnowsPage, LookCard, NoticedCard, SharePage, WantSheet, useSnap } from "../components/intel";
@@ -342,6 +342,7 @@ function Home({ state, act, setSheet, toggleKill, goActivity, openAgent, goAgent
     location.href = approveUrl;
   });
   const toApprove = state.purchases.filter((p) => p.status === "needs_approval").length;
+  const savedMonth = savedThisMonth(state);
   const suggesting = open.filter((a) => state.proposals.some((x) => x.agentId === a.id && x.status === "pending"));
 
   // This month: what agents actually spent, against what they may still spend.
@@ -437,14 +438,30 @@ function Home({ state, act, setSheet, toggleKill, goActivity, openAgent, goAgent
           <button className="btn gold block" onClick={connect}>Connect PayPal</button>
         </div>
       ) : open.length > 0 && (
-        <button className="card spend-card" onClick={() => goActivity()} aria-label={`This month: ${money(spentMonth)} spent. ${money(total)} still allowed across your agents. Open Activity.`}>
-          <span className="row between" style={{ alignItems: "flex-end" }}>
-            <span className="stack-xs">
-              <span className="footnote muted">This month</span>
-              <span className="row" style={{ gap: 8, alignItems: "baseline" }}><Money value={spentMonth} size="title" /><span className="footnote muted">spent</span></span>
+        <button className="card spend-card" onClick={() => goActivity()} aria-label={`${savedMonth !== undefined ? `Saved this month: ${money(savedMonth)}. ` : ""}This month: ${money(spentMonth)} spent. ${money(total)} still allowed across your agents. Open Activity.`}>
+          {/* Savings lead: they're the reason to come back. Only real savings (against what you usually pay) are shown. */}
+          {savedMonth !== undefined ? (
+            <span className="row between" style={{ alignItems: "flex-end" }}>
+              <span className="stack-xs">
+                <span className="footnote muted">Saved this month</span>
+                <span className="row" style={{ gap: 8, alignItems: "baseline" }}><Money value={savedMonth} size="title" className="ok-text" /></span>
+                <span className="caption muted">Against what you usually pay</span>
+              </span>
+              <span className="stack-xs" style={{ alignItems: "flex-end" }}>
+                <span className="footnote muted">{money(spentMonth)} spent</span>
+                <span className="caption muted">{money(total)} still allowed</span>
+              </span>
             </span>
-            <span className="footnote muted">{money(total)} still allowed</span>
-          </span>
+          ) : (
+            <span className="row between" style={{ alignItems: "flex-end" }}>
+              <span className="stack-xs">
+                <span className="footnote muted">This month</span>
+                <span className="row" style={{ gap: 8, alignItems: "baseline" }}><Money value={spentMonth} size="title" /><span className="footnote muted">spent</span></span>
+                <span className="caption muted">Savings appear after your first week</span>
+              </span>
+              <span className="footnote muted">{money(total)} still allowed</span>
+            </span>
+          )}
           <BudgetBar left={spentMonth} total={spentMonth + total} label={`${money(spentMonth)} spent of ${money(spentMonth + total)}`} />
         </button>
       )}

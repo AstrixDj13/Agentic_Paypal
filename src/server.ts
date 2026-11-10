@@ -13,6 +13,9 @@ import { agentSuggestions, buildProfile, ruleTips } from "./intel/profile.ts";
 import * as push from "./intel/push.ts";
 import { shareLink, snap } from "./intel/snap.ts";
 import { buildCheckin, maybeWeeklyCheckin, sendCheckin } from "./intel/checkin.ts";
+import * as routine from "./grocery/routine.ts";
+import { placeNow } from "./grocery/now.ts";
+import { GROCERY_STORES, STARTER_LIST, catalogView } from "./grocery/catalog.ts";
 import * as store from "./store/catalog.ts";
 import { channel3Enabled } from "./store/channel3.ts";
 import * as accounts from "./app/accounts.ts";
@@ -210,6 +213,22 @@ app.post("/api/agent/run", route((req) => svc.runAgent(req.body.mandateId, { mod
 app.post("/api/agent/find", route((req) => svc.findAndBuy(req.body.mandateId, baseUrl(req))));
 app.post("/api/store/import", route((req) => svc.importRealProducts(String(req.body.query ?? ""), req.body.maxPrice ? Number(req.body.maxPrice) : undefined)));
 app.post("/api/purchases/:id/approve", signed((req) => svc.approvePurchase(req.params.id)));
+/* ------------------------------ Weekly orders, right-now orders, buy in store ------------------------------ */
+app.get("/api/grocery/catalog", route(() => ({ stores: GROCERY_STORES, groups: catalogView(0), starter: STARTER_LIST, simulated: true })));
+// Swap and picking a substitute change what you pay, so they need the PIN. Keep usual and skip don't.
+app.post("/api/orders/:id/swap", signed((req) => routine.acceptSwap(req.params.id, String(req.body.itemId ?? ""))));
+app.post("/api/orders/:id/keep", route((req) => routine.keepUsual(req.params.id, String(req.body.itemId ?? ""))));
+app.post("/api/orders/:id/stockout", route((req) => {
+  const productId = req.body.productId ? String(req.body.productId) : null;
+  if (productId) auth.requireSignature(req.body?.auth, origin(req));
+  return routine.answerStockout(req.params.id, String(req.body.itemId ?? ""), productId);
+}));
+app.post("/api/orders/:id/place", signed((req) => routine.placeOrder(req.params.id, "user")));
+app.post("/api/orders/:id/order-now", signed((req) => placeNow(req.params.id, Number(req.body.choice) || 0)));
+app.post("/api/agents/:id/next-week", route((req) => routine.nextWeek(req.params.id)));
+// In store: no money moves through Pocket. Online instead: only an in-rules purchase that was already found.
+app.post("/api/purchases/:id/store", route((req) => svc.resolveStore(req.params.id, req.body.decision === "online" ? "online" : "in_store")));
+
 // "Take a look before I buy": skipping is always safe; "looks good" only brings forward a purchase that is already within the rules.
 app.post("/api/purchases/:id/look", route((req) => svc.resolveLook(req.params.id, req.body.decision === "skip" ? "skip" : "buy")));
 app.post("/api/purchases/:id/wrong", route((req) => svc.reportWrong(req.params.id, req.body)));
@@ -262,6 +281,7 @@ const forEveryone = (job: () => Promise<unknown>, label: string) => async () => 
 };
 setInterval(forEveryone(() => svc.sweepLooks(), "look sweep"), 3000).unref();
 setInterval(forEveryone(() => maybeWeeklyCheckin(), "weekly check-in"), 5 * 60_000).unref();
+setInterval(forEveryone(() => routine.sweepOrders(), "order deadlines"), 5000).unref();
 
 async function start() {
   let mode = "local file (single user)";

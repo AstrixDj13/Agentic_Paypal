@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { AppState, Mandate, Pocket, Proposal } from "../api";
-import { money } from "../api";
+import { money, savedThisMonth } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { Mark } from "./Brand";
 import { SignButton, type Signature } from "./lock";
@@ -114,10 +114,13 @@ export function demoSavings(agentId: string) {
   return 6 + (h % 1900) / 100; // $6.00 to $24.99
 }
 
-/** What the card shows besides money: savings (demo) and how many risky buys the rules stopped (real). */
+/**
+ * What the card shows besides money: real savings this month (only when there is a usual price to
+ * compare against; otherwise hidden) and how many risky buys the rules stopped.
+ */
 export function cardStats(state: AppState, agentId: string) {
   return {
-    saved: demoSavings(agentId),
+    saved: savedThisMonth(state, agentId),
     stopped: state.purchases.filter((p) => p.pocketId === agentId && p.status === "blocked").length,
   };
 }

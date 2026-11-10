@@ -1154,3 +1154,42 @@ select.input { background-image: linear-gradient(45deg, transparent 50%, var(--t
 .account-form .field { color: var(--text-muted); }
 .account-note { text-align: center; }
 .account-note .link-btn { font: inherit; }
+
+/* ------------------------------------ Weekly orders, right-now picks, buy in store ------------------------------------ */
+.order-card { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
+.order-card.open { border-color: color-mix(in srgb, var(--brand-blue) 35%, var(--border)); }
+.order-head { display: flex; align-items: flex-start; gap: 10px; }
+.order-head .badge { flex: none; }
+.order-note { display: flex; gap: 8px; align-items: flex-start; font-size: var(--text-sm); color: var(--text-muted); }
+.order-note svg { flex: none; margin-top: 2px; }
+.order-toggle { align-self: flex-start; }
+.order-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.order-line { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); }
+.order-line.skipped { opacity: 0.55; }
+.order-line.swap .caption, .order-line.substitute .caption { color: var(--brand-blue); }
+
+.ask-card { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 14px; background: color-mix(in srgb, var(--brand-blue) 7%, var(--surface)); border: 1px solid color-mix(in srgb, var(--brand-blue) 25%, var(--border)); }
+.ask-card.warn { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 35%, var(--border)); }
+.ask-compare { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ask-compare > span { display: inline-flex; flex-direction: column; gap: 1px; }
+.ask-compare strong { font-size: var(--text-body); font-variant-numeric: tabular-nums; }
+.ask-compare s { font-variant-numeric: tabular-nums; }
+
+.now-card .headline { font-size: var(--text-lg); }
+.store-card { border-color: color-mix(in srgb, var(--ok) 35%, var(--border)); }
+
+.receipt-lines { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; border-top: 1px dashed var(--border); }
+.receipt-savings { font-size: var(--text-sm); color: var(--text-muted); padding-top: 6px; }
+
+/* Main action for routine / right-now agents, next to the message box */
+.composer-actions { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 2px 6px; }
+.composer-actions .chip { gap: 6px; min-height: 32px; font-size: 13px; }
+.composer-actions .chip.quiet { color: var(--text-muted); }
+
+/* Weekly list editor */
+.list-editor { max-height: 46vh; overflow-y: auto; padding-right: 2px; }
+.list-row { display: flex; align-items: flex-start; gap: 8px; padding: 10px; border-radius: 14px; background: var(--surface-2); }
+.list-row .icon-btn { width: 32px; height: 32px; background: transparent; color: var(--text-muted); flex: none; }
+.input.sm-input { min-height: 36px; padding: 6px 10px; font-size: var(--text-sm); }
+.input.sm-input.qty { width: 52px; }
+.input.sm-input.price { width: 72px; }

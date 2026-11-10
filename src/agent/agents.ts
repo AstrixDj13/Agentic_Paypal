@@ -8,7 +8,10 @@ import { MERCHANT_ID, type Product } from "../store/catalog.ts";
  * 1. Mandate engine: plain words -> structured rules (user approves + signs afterwards)
  * ==================================================================================== */
 
-export type MandateDraft = Pick<Mandate, "item" | "required" | "allowed" | "maxUnitPrice" | "maxQuantity" | "expiresAt"> & { avoid?: string[]; description?: string; refImage?: string };
+export type MandateDraft = Pick<Mandate, "item" | "required" | "allowed" | "maxUnitPrice" | "maxQuantity" | "expiresAt"> & {
+  avoid?: string[]; description?: string; refImage?: string;
+  kind?: Mandate["kind"]; list?: Mandate["list"]; withinMinutes?: number; merchants?: string[];
+};
 
 const KNOWN_BRANDS = ["nike", "adidas", "puma", "asics", "new balance", "hoka", "brooks", "reebok", "on"];
 
@@ -20,7 +23,9 @@ item (short noun phrase), required (object of exact attribute values; use size_u
 allowed (object mapping attribute -> array of allowed lowercase values, e.g. {"brand":["nike","adidas"]}),
 maxUnitPrice (number, USD), maxQuantity (integer, default 1), expiresAt (ISO 8601 end of day UTC; default 30 days from today),
 avoid (array of lowercase words the user excluded, e.g. "not paprika" -> ["paprika"]; empty if none),
-description (string: every descriptive detail about how the product should look or be, beyond the fields above, e.g. "white leather low-top, gum sole, no visible logo"; empty if none).
+description (string: every descriptive detail about how the product should look or be, beyond the fields above, e.g. "white leather low-top, gum sole, no visible logo"; empty if none),
+withinMinutes (number, only if the user said it must arrive within a time, e.g. "within 30 minutes" -> 30; else omit),
+kind ("now" if it is a meal or delivery wanted right now / within minutes; otherwise "hunt").
 Only include constraints the user actually stated.`,
     instruction,
   );
@@ -43,10 +48,16 @@ export function sanitizeDraft(ai: any, now: Date = new Date()): MandateDraft | n
   const exp = new Date(ai.expiresAt);
   const avoid = (Array.isArray(ai.avoid) ? ai.avoid : ai.avoid ? [ai.avoid] : []).map((x: unknown) => String(x).trim().toLowerCase()).filter(Boolean).slice(0, 10);
   const description = typeof ai.description === "string" ? ai.description.trim().slice(0, 400) : "";
+  const within = Math.round(Number(ai.withinMinutes));
+  const kind = ai.kind === "now" || ai.kind === "routine" ? ai.kind : within > 0 ? "now" : undefined;
   return {
     item: String(ai.item),
     avoid,
     ...(description ? { description } : {}),
+    ...(within > 0 && within <= 240 ? { withinMinutes: within } : {}),
+    ...(kind ? { kind } : {}),
+    ...(Array.isArray(ai.list) && ai.list.length ? { list: ai.list } : {}),
+    ...(Array.isArray(ai.merchants) ? { merchants: ai.merchants.map(String).slice(0, 20) } : {}),
     ...(typeof ai.refImage === "string" && /^[a-f0-9]{32}$/.test(ai.refImage) ? { refImage: ai.refImage } : {}),
     required,
     allowed,
@@ -66,11 +77,13 @@ export function parseWithRules(text: string, now = new Date()): MandateDraft {
     t.match(/(\d+(?:\.\d+)?)\s*(?:dollars|usd|bucks)\b/)?.[1];
   const qty = t.match(/(\d+)\s*(?:pairs?|items?|units?)/)?.[1];
   const brands = KNOWN_BRANDS.filter((b) => new RegExp(`\\b${b}\\b`).test(t));
+  const within = Number(t.match(/within\s+(\d{1,3})\s*(?:min|mins|minutes)\b/)?.[1]) || undefined;
   const avoid = [...t.matchAll(/\b(?:not|no|except|without|never)\s+([a-z][a-z -]{1,30}?)(?=\s+(?:for|under|below|at|and|or|,)|[,.!]|$)/g)].map((x) => x[1].trim()).filter((w) => !/^(more|over|less|than|a|the)$/.test(w));
   const item = text.split(/[,.]/)[0].replace(/^(buy|get|find)\s+/i, "").replace(/\s+(?:and\s+)?(?:not|no|except|without)\s+.*$/i, "").replace(/\s+(?:for|under|below|at)\s+\$?\d.*$/i, "").replace(/size.*$/i, "").trim() || "item";
   return {
     item,
     avoid,
+    ...(within ? { withinMinutes: within, kind: "now" as const } : {}),
     required: size ? { size_us: size } : {},
     allowed: brands.length ? { brand: brands } : {},
     maxUnitPrice: price ? Number(price) : 100,

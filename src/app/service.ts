@@ -14,6 +14,7 @@ import { endException, exceptionOf, notifyPurchase, postMessage, proposeRuleChan
 import { AGENT_COLORS } from "./state.ts";
 import { notify } from "../intel/push.ts";
 import { imageFor, record } from "../intel/signals.ts";
+import { nearbyOffer } from "../grocery/nearby.ts";
 
 /** Orchestrates the buy path (agent -> guard -> PayPal) and the dispute path (photo -> arbiter -> PayPal). */
 
@@ -101,7 +102,11 @@ export function signNewMandate(pocketId: string, instruction: string, rawDraft: 
     ...(draft.avoid?.length ? { avoid: draft.avoid } : {}),
     ...(draft.description ? { description: draft.description } : {}),
     ...(draft.refImage ? { refImage: draft.refImage } : {}),
-    merchants: [store.MERCHANT_ID],
+    ...(draft.kind && draft.kind !== "hunt" ? { kind: draft.kind } : {}),
+    ...(draft.list?.length ? { list: draft.list } : {}),
+    ...(draft.withinMinutes ? { withinMinutes: draft.withinMinutes } : {}),
+    // Routine and right-now jobs buy from their own (simulated) stores; hunts buy at Stride Supply.
+    merchants: draft.merchants ?? (draft.kind === "routine" ? ["grocery"] : draft.kind === "now" ? [] : [store.MERCHANT_ID]),
     expiresAt: draft.expiresAt,
     createdAt: new Date().toISOString(),
   };
@@ -125,7 +130,7 @@ export function mandateOf(id: string): SignedMandate {
 
 /* ---------------------------------------- Guard state ---------------------------------------- */
 
-function guardState(pocket?: Pocket): GuardState {
+export function guardState(pocket?: Pocket): GuardState {
   const s = loadState();
   const today = new Date().toISOString().slice(0, 10);
   const purchasesToday = s.purchases.filter((p) => p.paypal && p.createdAt.startsWith(today)).length;
@@ -191,6 +196,19 @@ export async function runAgent(mandateId: string, opts: { mode?: agents.AgentMod
   recorder.append(purchase.id, "guard_decision", decision);
   saveState();
 
+  // "Buy it in store instead": a real-store hunt checks nearby shops (simulated) before paying online.
+  // The careful agent only; the weak demo agent never would. No payment through Pocket if the user goes to the shop.
+  const near = decision.outcome !== "block" && mode === "careful" && product.source && pocket.checkNearby !== false && (signed.mandate.kind ?? "hunt") === "hunt" && choice.order.quantity === 1
+    ? nearbyOffer(product.id, purchase.total) : null;
+  if (near) {
+    purchase.status = "store_suggested";
+    purchase.storeOffer = near;
+    recorder.append(purchase.id, "in_store", { suggested: true, ...near, saving: Math.round((near.onlinePrice - near.price) * 100) / 100 });
+    postMessage(pocket.id, "agent", `The same ${product.title} is $${near.price} at ${near.shop}, ${near.distanceKm} km away, versus $${near.onlinePrice} online. That's $${(near.onlinePrice - near.price).toFixed(2)} less if you pick it up. I haven't paid for anything.`, { purchaseId: purchase.id, needsYou: true });
+    saveState();
+    return { purchase };
+  }
+
   // "Take a look before I buy": hold an in-rules purchase for a moment and ping the phone.
   const look = Math.max(0, Math.min(3600, Number(pocket.lookFirstSec) || 0));
   if (decision.outcome === "allow" && look > 0) {
@@ -247,6 +265,37 @@ export async function resolveLook(purchaseId: string, decision: "buy" | "skip", 
     if (by === "user") record({ source: "app", kind: "approve", title: purchase.title, brand: purchase.order.attributes.brand, price: purchase.order.unitPrice, agentId: pocket.id });
     await executePurchase(purchase);
   }
+  notifyPurchase(purchase, signed.mandate);
+  saveState();
+  return purchase;
+}
+
+/**
+ * The user's answer to "buy it in store instead": they bought it at the shop (nothing is paid through
+ * Pocket; the saving is recorded) or they want it online after all (rules re-checked, then PayPal).
+ */
+export async function resolveStore(purchaseId: string, decision: "in_store" | "online"): Promise<Purchase> {
+  const purchase = purchaseOf(purchaseId);
+  if (purchase.status !== "store_suggested" || !purchase.storeOffer) throw new UserError("This isn't waiting on a shop decision.");
+  const signed = mandateOf(purchase.mandateId);
+  const pocket = pocketOf(purchase.pocketId);
+  const so = purchase.storeOffer;
+  if (decision === "in_store") {
+    purchase.status = "bought_in_store";
+    purchase.usual = so.onlinePrice;
+    purchase.saved = Math.round((so.onlinePrice - so.price) * 100) / 100;
+    recorder.append(purchase.id, "in_store", { boughtInStore: true, shop: so.shop, price: so.price, onlinePrice: so.onlinePrice, saved: purchase.saved, payment: "none through Pocket" });
+    postMessage(pocket.id, "agent", `Noted: you bought it at ${so.shop} for $${so.price}. You saved $${purchase.saved.toFixed(2)}, and nothing was paid through Pocket.`);
+    saveState();
+    return purchase;
+  }
+  const d = checkOrder(signed, purchase.order, pocket, guardState(pocket));
+  purchase.decision = d.outcome === "ask_user" ? { ...d, outcome: "allow", violations: [] } : d;
+  recorder.append(purchase.id, "guard_decision", { ...purchase.decision, chose: "online instead of in store" });
+  if (purchase.decision.outcome === "allow") {
+    purchase.status = "completed";
+    await executePurchase(purchase);
+  } else purchase.status = "blocked";
   notifyPurchase(purchase, signed.mandate);
   saveState();
   return purchase;
@@ -355,7 +404,7 @@ export async function approvePurchase(purchaseId: string): Promise<Purchase> {
   return purchase;
 }
 
-async function executePurchase(purchase: Purchase): Promise<void> {
+export async function executePurchase(purchase: Purchase): Promise<void> {
   const s = loadState();
   if (!s.vault) {
     purchase.status = "failed";

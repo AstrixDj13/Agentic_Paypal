@@ -237,7 +237,7 @@ export function notifyPurchase(p: Purchase, m: Mandate): void {
     postMessage(agent.id, "agent", `Found ${p.title} for ${price}. It fits your rules. ${why} Buy it?`, { purchaseId: p.id, needsYou: true });
     return;
   }
-  if (p.status === "awaiting_look") return; // announced (with photo and buttons) by the look-first step
+  if (p.status === "awaiting_look" || p.status === "store_suggested") return; // announced (with photo and buttons) where they're made
   if (p.status !== "blocked") return;
 
   const rules = p.decision.violations.map((v) => v.rule);

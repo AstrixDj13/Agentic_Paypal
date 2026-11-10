@@ -24,10 +24,29 @@ export interface Mandate {
   description?: string;
   /** sha256 of a reference photo the user attached; the photo itself is stored separately. */
   refImage?: string;
+  /** What kind of job: a one-time hunt (default), a weekly routine shop, or a right-now order. */
+  kind?: AgentKind;
+  /** Routine agents: the signed weekly list. maxUnitPrice is then the weekly budget. */
+  list?: ListItem[];
+  /** Right-now agents: it must arrive within this many minutes. */
+  withinMinutes?: number;
   /** Merchant ids the agent may buy from. Empty = any agent-ready merchant. */
   merchants: string[];
   expiresAt: string; // ISO
   createdAt: string; // ISO
+}
+
+export interface AgentPrefs {
+  /** "Keep usual" answers: `${itemId}:${productId}` swaps the agent won't suggest again. */
+  keepUsual?: string[];
+  /** Optional rule: swap automatically when the alternative is cheaper and the same size. */
+  autoSwapCheaper?: boolean;
+  /** Demo: which simulated week the routine agent is in ("Skip to next week"). */
+  week?: number;
+  /** Prices actually paid per list item (latest last); the usual price becomes their median. */
+  paid?: Record<string, number[]>;
+  /** How long the user has to answer before the order goes out with the usual items (seconds). */
+  orderDeadlineSec?: number;
 }
 
 export interface SignedMandate {
@@ -36,6 +55,20 @@ export interface SignedMandate {
   publicKey: string;
   /** Ed25519 signature over canonical JSON of `mandate`, base64. */
   signature: string;
+}
+
+export type AgentKind = "hunt" | "routine" | "now";
+
+/** One line of a weekly list: the usual product, how many, and what the user usually pays for it. */
+export interface ListItem {
+  id: string;
+  group: string;
+  name: string;
+  size: string;
+  productId: string;
+  qty: number;
+  /** What the user usually pays (each). Savings are only ever measured against this, never a list price. */
+  usualPrice: number;
 }
 
 /** "Ask me about anything" = every purchase needs a tap; "only ask about money" = buys inside the rules on its own. */
@@ -56,6 +89,11 @@ export interface Pocket {
   paused?: boolean;
   /** "Take a look before I buy": seconds the agent waits (and pings the phone) before an in-rules purchase. 0 = off. */
   lookFirstSec?: number;
+  kind?: AgentKind;
+  /** One-time hunts: also check nearby shops and suggest buying in store when it's cheaper. */
+  checkNearby?: boolean;
+  /** What the agent has learned and its routine settings. */
+  prefs?: AgentPrefs;
   /** Closed agents never buy again. Their purchases and records stay. Restoring needs the user's PIN. */
   closedAt?: string;
   /** Chat messages after this time count as unread. */

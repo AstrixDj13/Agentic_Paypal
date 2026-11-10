@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { api, money, useIntel, type AgentPrefill, type AppState, type AskMode, type MandateDraft, type Pocket } from "../api";
+import { api, money, useIntel, type AgentKind, type AgentPrefill, type AppState, type AskMode, type MandateDraft, type Pocket } from "../api";
 import { DescribeFields, RuleTips, SuggestionCard } from "./intel";
+import { ListEditor, useCatalog, type ListRow } from "./orders";
 import { Icon } from "./Icon";
 import { AGENT_COLORS, AgentIcon, PALETTE, activeMandate, agentTone, limitsLine, suggestPocketName, toneOf } from "./agent";
 import { SignButton, useSigner, type Signature } from "./lock";
@@ -97,13 +98,30 @@ export function NewAgent({ state, act, close, open, prefill }: { state: AppState
   const ideas = (intel?.suggestions ?? []).slice(0, 2);
   const [askMode, setAskMode] = useState<AskMode>("money");
   const d = useDraft();
-  const suggested = suggestPocketName(d.draft?.item, state.pockets.map((p) => p.name));
+  // Three kinds of agent: a one-time hunt (default), a weekly routine shop, or a right-now order.
+  const [kind, setKind] = useState<AgentKind>("hunt");
+  const catalog = useCatalog();
+  const [rows, setRows] = useState<ListRow[] | null>(null);
+  const list = rows ?? (catalog ? catalog.starter.map((x) => ({ productId: x.productId, qty: x.qty, usualPrice: catalog.groups.flatMap((g) => g.products).find((p) => p.id === x.productId)?.price ?? 0 })) : []);
+  const usualWeek = Math.round(list.reduce((t, r) => t + r.usualPrice * r.qty, 0) * 100) / 100;
+  const [budget, setBudget] = useState<string | null>(null);
+  const weeklyBudget = budget ?? String(Math.ceil(usualWeek * 1.15));
+  const routine = kind === "routine";
+  const chooseKind = (k: AgentKind) => {
+    setKind(k);
+    if (k === "now") setInstruction("Chicken biryani under $15 with delivery, within 30 minutes");
+    else if (k === "hunt" && /biryani/i.test(instruction)) setInstruction(EXAMPLES[0]);
+  };
+  const suggested = suggestPocketName(routine ? "weekly groceries" : d.draft?.item, state.pockets.map((p) => p.name));
   const finalName = (name ?? suggested).trim();
   const taken = state.pockets.some((p) => p.name.toLowerCase() === finalName.toLowerCase());
   const shown = step === 3 ? finalName || "New pocket" : "New pocket";
 
   const create = (auth: Signature) => act(async () => {
-    const r = await api<{ agent: Pocket }>("/api/agents", { auth, name: finalName, color, amount: Number(amount), askMode, instruction, draft: d.draft });
+    const body = routine
+      ? { auth, kind: "routine", name: finalName, color, amount: Number(amount), askMode, list, weeklyBudget: Number(weeklyBudget) }
+      : { auth, name: finalName, color, amount: Number(amount), askMode, instruction, draft: kind === "now" ? { ...d.draft, kind: "now" } : d.draft };
+    const r = await api<{ agent: Pocket }>("/api/agents", body);
     close();
     open(r.agent.id);
   }, undefined, { rethrow: true });
@@ -111,7 +129,7 @@ export function NewAgent({ state, act, close, open, prefill }: { state: AppState
   return (
     <div className="stack">
       <div className="new-agent-hero">
-        <AgentIcon name={step === 3 ? shown : undefined} item={d.draft?.item ?? (step >= 2 ? instruction : undefined)} tone={agentTone(d.draft?.item ?? (step >= 2 ? instruction : undefined))} size={64} />
+        <AgentIcon name={step === 3 ? shown : undefined} item={routine && step >= 2 ? "weekly groceries" : d.draft?.item ?? (step >= 2 ? instruction : undefined)} tone={agentTone(routine && step >= 2 ? "weekly groceries" : d.draft?.item ?? (step >= 2 ? instruction : undefined))} size={64} />
         <div className="stack-xs" style={{ alignItems: "center" }}>
           <strong className="title-2">{shown}</strong>
           <span className="caption muted">Step {step} of 3</span>
@@ -131,8 +149,25 @@ export function NewAgent({ state, act, close, open, prefill }: { state: AppState
       )}
 
       {step === 2 && (
+        <Segmented<AgentKind> value={kind} onChange={chooseKind} options={[{ value: "hunt", label: "One-time hunt" }, { value: "routine", label: "Weekly shop" }, { value: "now", label: "Right now" }]} />
+      )}
+      {step === 2 && routine && (
         <>
-          <p className="subhead muted">What should it buy? Describe it in your own words, with your limits.</p>
+          <p className="subhead muted">Your weekly list. The agent reorders it every week, buys each item where it's cheapest, and asks once about better deals.</p>
+          {catalog ? <ListEditor rows={list} setRows={setRows} groups={catalog.groups} /> : <span className="spinner" />}
+          <label className="field">Weekly budget ($)
+            <input className="input" inputMode="decimal" value={weeklyBudget} onChange={(e) => setBudget(e.target.value.replace(/[^0-9.]/g, ""))} />
+          </label>
+          <p className="caption muted">Stores are simulated (FreshCart, DailyMart). Real grocery apps don't offer ordering APIs yet.</p>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn ghost" onClick={() => setStep(1)}>Back</button>
+            <button className="btn primary grow" disabled={!list.length || !(Number(weeklyBudget) > 0)} onClick={() => setStep(3)}>Next</button>
+          </div>
+        </>
+      )}
+      {step === 2 && !routine && (
+        <>
+          <p className="subhead muted">{kind === "now" ? "What do you want right now? Say the budget and how fast it must arrive." : "What should it buy? Describe it in your own words, with your limits."}</p>
           <textarea className="input textarea" value={instruction} onChange={(e) => setInstruction(e.target.value)} aria-label="The job in your words" />
           {keep.refImage && <p className="footnote muted row" style={{ gap: 8 }}><img className="ref-thumb" src={`/api/intel/image/${keep.refImage}`} alt="" />Your photo will be used to search too.</p>}
           {!prefill && ideas.length > 0 ? (
@@ -157,7 +192,29 @@ export function NewAgent({ state, act, close, open, prefill }: { state: AppState
         </>
       )}
 
-      {step === 3 && d.draft && (
+      {step === 3 && routine && (
+        <>
+          <label className="field">Name
+            <input className="input" value={name ?? suggested} maxLength={24} onChange={(e) => setName(e.target.value)} />
+          </label>
+          {taken && <p className="footnote danger-text">You already have an agent called {finalName}.</p>}
+          <div className="stack-sm">
+            <span className="headline">When should {shown} ask you?</span>
+            <Segmented<AskMode> value={askMode} onChange={setAskMode} options={[{ value: "anything", label: "About anything" }, { value: "money", label: "Only about money" }]} />
+            <p className="footnote muted">{askMode === "anything" ? "Each week's order waits for your approval." : "Places each week's order on its own. Swaps and anything that costs more always ask you first."}</p>
+          </div>
+          <div className="card summary-card">
+            <AgentIcon name={shown} item="weekly groceries" tone={agentTone("weekly groceries")} size={36} />
+            <p className="footnote grow"><strong>{shown}</strong> gets <strong>{money(Number(amount))}</strong> for your weekly shop: <strong>{list.length} items</strong>, usually about {money(usualWeek)}, never more than {money(Number(weeklyBudget))} a week.</p>
+          </div>
+          <SignButton progress={{ working: `Setting up ${finalName}`, done: `${finalName} is ready` }} title={`Create ${shown}`} detail={`Weekly shop · ${list.length} items · up to ${money(Number(weeklyBudget))} a week`}
+            approval={{ amount: Number(amount), rows: [{ label: "Agent", value: shown }, { label: "Job", value: `Weekly shop, ${list.length} items` }, { label: "Weekly budget", value: money(Number(weeklyBudget)) }, { label: "Swaps", value: "Always ask, this week only" }], note: "This amount moves into the agent's pocket. It can't spend more than this." }}
+            onSigned={create} disabled={!finalName || taken || !list.length}>Create agent</SignButton>
+          <button className="btn ghost block" onClick={() => setStep(2)}>Back</button>
+        </>
+      )}
+
+      {step === 3 && !routine && d.draft && (
         <>
           <label className="field">Name
             <input className="input" value={name ?? suggested} maxLength={24} onChange={(e) => setName(e.target.value)} aria-describedby="name-hint" />

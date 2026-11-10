@@ -17,6 +17,8 @@ const STATUS_ICON: Record<Purchase["status"], IconName> = {
   blocked: "hand",
   needs_approval: "clock",
   awaiting_look: "eye",
+  store_suggested: "store",
+  bought_in_store: "check",
   skipped: "close",
   failed: "alert",
   disputed: "eye",
@@ -132,7 +134,19 @@ export function Receipt({ state, p }: { state: AppState; p: Purchase }) {
       {agent && <div className="receipt-row"><span>Agent</span><span>{agent.name}</span></div>}
       <div className="receipt-row"><span>Date</span><span>{when(p.createdAt)}</span></div>
       <div className="receipt-row"><span>Rule check</span><span className={ruleOk ? "ok-text" : "danger-text"}>{ruleOk ? (p.decision.violations.length ? "Within limits, asked you first" : "Within your limits") : "Outside your limits"}</span></div>
+      {p.lines && (
+        <div className="receipt-lines">
+          {p.lines.filter((l) => l.kind !== "skipped" && l.chosen).map((l) => (
+            <div key={l.itemId} className="receipt-row"><span>{l.qty} × {l.chosen!.title}{l.kind !== "usual" ? ` (${l.kind})` : ""}</span><span className="num-plain">{money(l.chosen!.price * l.qty)}</span></div>
+          ))}
+        </div>
+      )}
       <div className="receipt-total"><span>Total</span><Money value={p.total} size="body" /></div>
+      {p.usual !== undefined && p.saved !== undefined && (
+        <div className="receipt-savings">
+          Usually {money(p.usual)} · Paid {money(p.status === "bought_in_store" ? p.usual - p.saved : p.total)} · <strong className={p.saved > 0 ? "ok-text" : ""}>{p.saved > 0 ? `Saved ${money(p.saved)}` : p.saved < 0 ? `${money(-p.saved)} more than usual` : "Same as usual"}</strong>
+        </div>
+      )}
       {p.paypal?.captureId && <div className="receipt-row"><span>Paid with</span><span className="row" style={{ gap: 6 }}><Mark size={16} />PayPal</span></div>}
       {ref && (
         <details className="receipt-more">

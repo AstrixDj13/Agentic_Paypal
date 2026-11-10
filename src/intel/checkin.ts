@@ -1,5 +1,6 @@
 import { loadState } from "../app/state.ts";
 import { lastCheckin, markCheckin, notify } from "./push.ts";
+import { orderSummary, pendingAsks } from "../grocery/routine.ts";
 
 /**
  * The weekly check-in: one notification a week instead of a ping per item.
@@ -43,6 +44,11 @@ export function buildCheckin(now = new Date()): Checkin {
       what: p.kind === "transfer" ? "a money move" : p.kind === "job" ? "a new job" : p.retryProductId ? "a one-time exception" : "a rule change",
     })),
   ];
+  const orders = (s.orders ?? []).filter((o) => o.kind === "weekly" && (o.status === "awaiting" || o.status === "needs_approval"));
+  for (const o of orders) {
+    const asks = pendingAsks(o).length;
+    if (asks || o.status === "needs_approval") waiting.push({ agentId: o.agentId, agent: name(o.agentId), what: asks ? `${asks} swap${asks === 1 ? "" : "s"} on this week's order` : "approve this week's order" });
+  }
   const since = now.getTime() - 7 * 864e5;
   const thisWeek = s.purchases.filter((p) => Date.parse(p.createdAt) >= since);
   const paid = thisWeek.filter((p) => p.paypal);
@@ -63,9 +69,12 @@ export function buildCheckin(now = new Date()): Checkin {
   const asks = waiting.length
     ? `${waiting.length} thing${waiting.length === 1 ? "" : "s"} to approve: ${waiting.slice(0, 3).map((w) => `${w.agent} (${w.what})`).join("; ")}${waiting.length > 3 ? ` and ${waiting.length - 3} more` : ""}.`
     : "Nothing needs you.";
+  const saved = Math.round(paid.reduce((t, p) => t + (p.saved ?? 0), 0) * 100) / 100
+    + Math.round(thisWeek.filter((p) => p.status === "bought_in_store").reduce((t, p) => t + (p.saved ?? 0), 0) * 100) / 100;
+  const orderLine = orders[0] ? `${orderSummary(orders[0]).replace("This week's order", "Saturday's order")} ` : "";
   return {
     title: "Your weekly check-in",
-    body: `${did}${extra ? ` · ${extra}` : ""}. ${asks}`,
+    body: `${orderLine}${did}${saved > 0 ? ` · saved ${money(saved)}` : ""}${extra ? ` · ${extra}` : ""}. ${asks}`,
     url: waiting[0] ? `/agents/${waiting[0].agentId}` : "/",
     waiting,
     week,

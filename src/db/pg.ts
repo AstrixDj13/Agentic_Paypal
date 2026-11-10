@@ -130,6 +130,21 @@ create table if not exists signals (
 );
 create index if not exists signals_at on signals(user_id, at desc);
 
+-- Weekly grocery orders and right-now orders (before they become purchases).
+create table if not exists orders (
+  user_id text not null references users(id) on delete cascade,
+  id text not null,
+  agent_id text not null,
+  kind text not null,
+  status text not null,
+  total numeric(12,2),
+  created_at timestamptz,
+  data jsonb not null,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, id)
+);
+create index if not exists orders_agent on orders(user_id, agent_id, created_at desc);
+
 -- Reference photos for rules ("describe it"), keyed by hash.
 create table if not exists images (
   user_id text not null references users(id) on delete cascade,

@@ -5,6 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export type Attributes = Record<string, string>;
 
 export type AskMode = "anything" | "money";
+export type AgentKind = "hunt" | "routine" | "now";
+export interface ListItem { id: string; group: string; name: string; size: string; productId: string; qty: number; usualPrice: number }
 
 /** A pocket is an agent: its own money, name, colour and one job. */
 export interface Pocket {
@@ -14,6 +16,9 @@ export interface Pocket {
   closedAt?: string;
   /** "Take a look before I buy": seconds to wait (and ping the phone) before an in-rules purchase. */
   lookFirstSec?: number;
+  kind?: AgentKind;
+  checkNearby?: boolean;
+  prefs?: { keepUsual?: string[]; autoSwapCheaper?: boolean; week?: number; orderDeadlineSec?: number };
 }
 
 export interface DiffRow { label: string; from: string; to: string }
@@ -28,7 +33,7 @@ export interface Proposal {
 }
 export interface ChatMessage {
   id: string; agentId: string; from: "user" | "agent" | "system"; text: string; at: string;
-  needsYou?: boolean; proposalId?: string; purchaseId?: string;
+  needsYou?: boolean; proposalId?: string; purchaseId?: string; orderId?: string;
 }
 export interface ActiveException { agentId: string; baseMandateId: string; tempMandateId: string; scope: "once" | "until"; until?: string; proposalId: string }
 
@@ -42,6 +47,9 @@ export interface Mandate {
   description?: string;
   /** Hash of a reference photo (served at /api/intel/image/:hash). */
   refImage?: string;
+  kind?: AgentKind;
+  list?: ListItem[];
+  withinMinutes?: number;
 }
 export interface SignedMandate { mandate: Mandate; publicKey: string; signature: string }
 export type MandateDraft = Pick<Mandate, "item" | "required" | "allowed" | "maxUnitPrice" | "maxQuantity" | "expiresAt" | "avoid" | "description" | "refImage">;
@@ -57,7 +65,13 @@ export type Verdict = "MERCHANT_AT_FAULT" | "AGENT_AT_FAULT" | "INSTRUCTION_UNCL
 
 export interface Purchase {
   id: string; mandateId: string; pocketId: string; productId: string; title: string;
-  status: "blocked" | "needs_approval" | "awaiting_look" | "skipped" | "completed" | "failed" | "disputed" | "resolved" | "escalated";
+  status: "blocked" | "needs_approval" | "awaiting_look" | "skipped" | "store_suggested" | "bought_in_store" | "completed" | "failed" | "disputed" | "resolved" | "escalated";
+  /** Honest savings: what you usually pay (total) and usual minus paid, when known. */
+  usual?: number;
+  saved?: number;
+  lines?: OrderLine[];
+  orderId?: string;
+  storeOffer?: { shop: string; address: string; distanceKm: number; price: number; onlinePrice: number; simulated: true };
   /** Look-first purchases go ahead at this time unless skipped. */
   lookUntil?: string;
   mode: "careful" | "naive";
@@ -99,6 +113,7 @@ export interface AppState {
   products: Product[]; photoPresets: string[];
   channel3: { enabled: boolean };
   chats: ChatMessage[]; proposals: Proposal[]; exceptions: ActiveException[];
+  orders?: Order[];
 }
 
 export interface LedgerEntry { seq: number; ts: string; purchaseId: string; kind: string; payload: any; prevHash: string; hash: string }
@@ -174,6 +189,8 @@ export const attrsText = (a: Attributes) => Object.entries(a).map(([k, v]) => `$
 export const STATUS_LABEL: Record<Purchase["status"], { text: string; tone: string }> = {
   completed: { text: "Bought", tone: "ok" },
   awaiting_look: { text: "Take a look", tone: "warn" },
+  store_suggested: { text: "Cheaper in store", tone: "warn" },
+  bought_in_store: { text: "Bought in store", tone: "ok" },
   skipped: { text: "Skipped", tone: "neutral" },
   blocked: { text: "Stopped", tone: "danger" },
   needs_approval: { text: "Needs approval", tone: "warn" },
@@ -251,4 +268,40 @@ export function useIntel(intervalMs = 5000) {
   const refresh = useCallback(async () => { try { setIntel(await api<IntelView>("/api/intel")); } catch { /* offline: keep last */ } }, []);
   useEffect(() => { refresh(); const t = setInterval(refresh, intervalMs); return () => clearInterval(t); }, [refresh, intervalMs]);
   return { intel, refresh };
+}
+
+/* ---------------------------- Weekly orders, right-now picks, savings ---------------------------- */
+
+export interface OrderOption { productId: string; title: string; brand: string; store: string; price: number; regular: number; onDeal: boolean }
+export interface OrderLine {
+  itemId: string; name: string; size: string; qty: number;
+  usual: { productId: string; title: string; store: string; price: number; inStock: boolean };
+  usualPrice: number;
+  chosen?: { productId: string; title: string; brand: string; store: string; price: number };
+  kind: "usual" | "swap" | "substitute" | "skipped";
+  ask?: { type: "swap" | "stockout"; status: "pending" | "accepted" | "kept" | "default" | "auto"; reason: string; options: OrderOption[] };
+  note?: string;
+}
+export interface NowPick { restaurantId: string; restaurant: string; dish: string; price: number; fee: number; total: number; rating: number; etaMin: number; why: string }
+export interface Order {
+  id: string; agentId: string; mandateId: string; kind: "weekly" | "now";
+  status: "awaiting" | "needs_approval" | "placed" | "failed" | "blocked" | "cancelled";
+  createdAt: string; deadline?: string; week?: number; lines?: OrderLine[]; pick?: NowPick; alternatives?: NowPick[];
+  total: number; usualTotal?: number; saved?: number; purchaseId?: string; error?: string;
+}
+
+export const STORE_NAME: Record<string, string> = { freshcart: "FreshCart", dailymart: "DailyMart" };
+
+/**
+ * Saved this month, honestly: only purchases where we know what the user usually pays
+ * (weekly orders, buying in store). Undefined when there's nothing to compare against yet,
+ * so the UI shows "Savings appear after your first week" instead of a $0 or a made-up number.
+ */
+export function savedThisMonth(state: AppState, agentId?: string): number | undefined {
+  const start = new Date(); start.setDate(1); start.setHours(0, 0, 0, 0);
+  const counted = state.purchases.filter((p) => (!agentId || p.pocketId === agentId) && p.usual !== undefined && p.saved !== undefined
+    && ["completed", "disputed", "escalated", "bought_in_store"].includes(p.status) && Date.parse(p.createdAt) >= start.getTime());
+  if (!counted.length) return undefined;
+  // Net: a week that cost a little more than usual counts against the total (never shown below $0).
+  return Math.max(0, Math.round(counted.reduce((t, p) => t + (p.saved ?? 0), 0) * 100) / 100);
 }

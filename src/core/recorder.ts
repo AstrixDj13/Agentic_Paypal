@@ -23,7 +23,10 @@ export type EntryKind =
   | "proposal"
   | "proposal_decision"
   | "exception_ended"
-  | "transfer";
+  | "transfer"
+  | "order_built"
+  | "order_answer"
+  | "in_store";
 
 export interface Entry {
   seq: number;

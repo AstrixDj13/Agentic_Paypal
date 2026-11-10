@@ -58,12 +58,13 @@ const SPECS: Spec[] = [
   { table: "proposals", hasData: true, updatedAt: true, rows: (s) => s.proposals.map((p) => ({ id: p.id, cols: { agent_id: p.agentId, kind: p.kind, status: p.status, created_at: ts(p.createdAt) }, data: p })) },
   { table: "chat_messages", hasData: true, updatedAt: false, rows: (s) => s.chats.map((c) => ({ id: c.id, cols: { agent_id: c.agentId, sender: c.from, at: ts(c.at) }, data: c })) },
   { table: "signals", hasData: true, updatedAt: false, rows: (s) => (intelOf(s).signals ?? []).map((g) => ({ id: g.id, cols: { source: g.source, kind: g.kind, domain: g.domain ?? null, title: g.title ?? g.query ?? null, at: ts(g.at) }, data: g })) },
+  { table: "orders", hasData: true, updatedAt: true, rows: (s) => (s.orders ?? []).map((o) => ({ id: o.id, cols: { agent_id: o.agentId, kind: o.kind, status: o.status, total: o.total, created_at: ts(o.createdAt) }, data: o })) },
   { table: "images", hasData: false, updatedAt: false, rows: (s) => Object.entries(intelOf(s).images ?? {}).map(([id, url]) => ({ id, cols: { data_url: url } })) },
 ];
 
 /** Everything that isn't one of the tables above: settings, PIN hash, vault, learning settings. */
 function settingsOf(s: AppState) {
-  const { pockets, mandates, retiredMandates, purchases, chats, proposals, ...rest } = s;
+  const { pockets, mandates, retiredMandates, purchases, chats, proposals, orders, ...rest } = s;
   const intel = (rest as { intel?: Intel }).intel;
   if (intel) { const { signals, images, ...keep } = intel; (rest as { intel?: unknown }).intel = keep; }
   return rest;
@@ -104,7 +105,7 @@ export async function loadUser(userId: string, migrate: (s: AppState) => AppStat
   const hit = cache.get(userId);
   if (hit) return hit;
   const q = (sql: string) => db().query(sql, [userId]).then((r) => r.rows);
-  const [us, ag, md, pu, pr, ch, sg, im, lg] = await Promise.all([
+  const [us, ag, md, pu, pr, ch, sg, im, lg, od] = await Promise.all([
     q("select data from user_state where user_id = $1"),
     q("select data from agents where user_id = $1"),
     q("select data, active from mandates where user_id = $1"),
@@ -114,6 +115,7 @@ export async function loadUser(userId: string, migrate: (s: AppState) => AppStat
     q("select data from signals where user_id = $1"),
     q("select id, data_url from images where user_id = $1"),
     q("select seq, ts, purchase_id, kind, payload, prev_hash, hash from ledger where user_id = $1 order by seq"),
+    q("select data from orders where user_id = $1"),
   ]);
   const by = <T>(rows: { data: T }[], key: (x: T) => string | undefined, desc = false) =>
     rows.map((r) => r.data).sort((a, b) => ((key(a) ?? "") < (key(b) ?? "") ? -1 : 1) * (desc ? -1 : 1));
@@ -126,6 +128,7 @@ export async function loadUser(userId: string, migrate: (s: AppState) => AppStat
     purchases: by(pu, (p: any) => p.createdAt, true),
     proposals: by(pr, (p: any) => p.createdAt),
     chats: by(ch, (c: any) => c.at),
+    orders: by(od, (o: any) => o.createdAt),
   } as AppState;
   const intel = ((base as { intel?: Intel }).intel ?? {}) as Intel & Record<string, unknown>;
   (state as AppState & { intel?: unknown }).intel = { ...intel, signals: by(sg, (g: any) => g.at), images: Object.fromEntries(im.map((r: any) => [r.id, r.data_url])) };

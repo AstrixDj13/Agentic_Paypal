@@ -8,7 +8,60 @@ import type { AuthState } from "./auth.ts";
 import { currentEntry, localEntry, markChanged } from "../db/store.ts";
 import { pgEnabled } from "../db/pg.ts";
 
-export type PurchaseStatus = "blocked" | "needs_approval" | "awaiting_look" | "skipped" | "completed" | "failed" | "disputed" | "resolved" | "escalated";
+export type PurchaseStatus = "blocked" | "needs_approval" | "awaiting_look" | "skipped" | "store_suggested" | "bought_in_store" | "completed" | "failed" | "disputed" | "resolved" | "escalated";
+
+/** A line on a weekly order: the usual item, and what was actually chosen (usual, a swap, or a substitute). */
+export interface OrderLine {
+  itemId: string;
+  name: string;
+  size: string;
+  qty: number;
+  usual: { productId: string; title: string; store: string; price: number; inStock: boolean };
+  /** What the user usually pays (each). */
+  usualPrice: number;
+  chosen?: { productId: string; title: string; brand: string; store: string; price: number };
+  kind: "usual" | "swap" | "substitute" | "skipped";
+  ask?: {
+    type: "swap" | "stockout";
+    status: "pending" | "accepted" | "kept" | "default" | "auto";
+    reason: string;
+    options: { productId: string; title: string; brand: string; store: string; price: number; regular: number; onDeal: boolean }[];
+  };
+  note?: string;
+}
+
+/** Right-now agent: one restaurant pick with its reasons. */
+export interface NowPick {
+  restaurantId: string;
+  restaurant: string;
+  dish: string;
+  price: number;
+  fee: number;
+  total: number;
+  rating: number;
+  etaMin: number;
+  why: string;
+}
+
+/** A weekly grocery order or a right-now order, before it becomes a Purchase. */
+export interface Order {
+  id: string;
+  agentId: string;
+  mandateId: string;
+  kind: "weekly" | "now";
+  status: "awaiting" | "needs_approval" | "placed" | "failed" | "blocked" | "cancelled";
+  createdAt: string;
+  deadline?: string;
+  week?: number;
+  lines?: OrderLine[];
+  pick?: NowPick;
+  alternatives?: NowPick[];
+  total: number;
+  usualTotal?: number;
+  saved?: number;
+  purchaseId?: string;
+  error?: string;
+}
 
 export interface Resolution {
   type: "refund" | "payout" | "mandate_fix" | "review" | "evidence_pack";
@@ -34,6 +87,14 @@ export interface Purchase {
   why?: string;
   /** "Take a look before I buy": the purchase goes ahead at this time unless the user skips it. */
   lookUntil?: string;
+  /** Honest savings: what the user usually pays for this (total), and usual minus paid when that's known. */
+  usual?: number;
+  saved?: number;
+  /** Weekly orders: the lines that were bought. */
+  lines?: OrderLine[];
+  orderId?: string;
+  /** "Buy it in store instead": a nearby shop with the same item for less. No payment through Pocket. */
+  storeOffer?: { shop: string; address: string; distanceKm: number; price: number; onlinePrice: number; simulated: true };
   paypal?: { orderId: string; captureId?: string; status: string };
   error?: string;
   dispute?: {
@@ -98,6 +159,7 @@ export interface ChatMessage {
   needsYou?: boolean;
   proposalId?: string;
   purchaseId?: string;
+  orderId?: string;
 }
 
 /** A one-time or temporary rule change in force. The base mandate comes back when it ends. */
@@ -128,6 +190,8 @@ export interface AppState {
   chats: ChatMessage[];
   proposals: Proposal[];
   exceptions: ActiveException[];
+  /** Weekly grocery orders and right-now orders. */
+  orders?: Order[];
   /** PIN hash and registered Face ID / fingerprint keys. Never sent to the browser. */
   auth?: AuthState;
 }
@@ -164,6 +228,7 @@ export function migrate(s: AppState): AppState {
   s.chats ??= [];
   s.proposals ??= [];
   s.exceptions ??= [];
+  s.orders ??= [];
   s.pockets.forEach((p, i) => {
     p.color ??= AGENT_COLORS[i % AGENT_COLORS.length];
     p.askMode ??= "money";
@@ -202,6 +267,7 @@ export function freshState(): AppState {
     chats: [],
     proposals: [],
     exceptions: [],
+    orders: [],
   };
 }
 

@@ -5,8 +5,9 @@ import { AgentIcon, AgentCardFace, BudgetBar, BudgetRing, ProposalCard, activeMa
 import { arrive, flyFrom, land, launch, reducedMotion } from "../motion";
 import { SignButton, type Signature } from "../components/lock";
 import { FeedItem, StatusBadge, purchaseApproval, approvePurchaseOrThrow, type Act } from "../components/purchase";
-import { Money, Segmented } from "../components/ui";
+import { Money, Segmented, Switch } from "../components/ui";
 import { LOOK_OPTIONS, LookCard } from "../components/intel";
+import { NowCard, OrderCard, StoreOfferCard } from "../components/orders";
 import type { SheetState } from "./PocketApp";
 import { RestoreButton } from "../components/agentSheets";
 
@@ -249,6 +250,13 @@ function Chat({ state, agent, act, refresh, show, setSheet, busyOuter, decide, o
     ...state.purchases.filter((p) => p.pocketId === agent.id && p.status === "needs_approval").map((p) => ({ id: `buy-${p.id}`, label: `Approve ${p.title}` })),
     ...state.purchases.filter((p) => p.pocketId === agent.id && p.status === "awaiting_look").map((p) => ({ id: `buy-${p.id}`, label: `Take a look: ${p.title}` })),
     ...state.proposals.filter((p) => p.agentId === agent.id && p.status === "pending").map((p) => ({ id: `prop-${p.id}`, label: p.summary })),
+    ...state.purchases.filter((p) => p.pocketId === agent.id && p.status === "store_suggested").map((p) => ({ id: `buy-${p.id}`, label: `Cheaper in store: ${p.title}` })),
+    ...(state.orders ?? []).filter((o) => o.agentId === agent.id && (o.status === "awaiting" || o.status === "needs_approval")).flatMap((o) => {
+      const asks = (o.lines ?? []).filter((l) => l.ask?.status === "pending").length;
+      if (o.kind === "now") return [{ id: `order-${o.id}`, label: `Your pick: ${o.pick?.dish}` }];
+      if (asks) return [{ id: `order-${o.id}`, label: `${asks} ${asks === 1 ? "question" : "questions"} on this week's order` }];
+      return o.status === "needs_approval" ? [{ id: `order-${o.id}`, label: "Approve this week's order" }] : [];
+    }),
   ];
 
   // Open with the card on top and the latest few items under it; follow new ones as they arrive.
@@ -296,11 +304,20 @@ function Chat({ state, agent, act, refresh, show, setSheet, busyOuter, decide, o
   };
 
   // Starter questions: only in an empty conversation (the mic and the box cover the rest).
-  const starters = mine === 0 && !agent.closedAt ? [
+  const kind = signed?.mandate.kind ?? "hunt";
+  const starters = mine === 0 && !agent.closedAt && kind === "hunt" ? [
     "What are your rules?",
     signed ? "Check the store now" : null,
     signed ? `Go up to ${money(Math.round(signed.mandate.maxUnitPrice * 1.4))} just this once` : null,
   ].filter(Boolean) as string[] : [];
+  // Routine and right-now agents get their main action next to the message box (it stands in for a schedule).
+  const [acting, setActing] = useState(false);
+  const runCheck = async () => {
+    setActing(true);
+    try { await api(`/api/agents/${agent.id}/check`, {}); await refresh(); requestAnimationFrame(() => document.querySelector(".screen")?.scrollTo({ top: 1e9, behavior: "smooth" })); }
+    catch (e) { show((e as Error).message, true); } finally { setActing(false); }
+  };
+  const nextWeek = () => act(() => api(`/api/agents/${agent.id}/next-week`, {}), "Moved to next week (demo). Prices and stock have changed.");
 
   const showSend = !!text.trim() || !mic.supported || busy;
   const paused = !agent.closedAt && (state.killSwitch || agent.paused);
@@ -358,6 +375,15 @@ function Chat({ state, agent, act, refresh, show, setSheet, busyOuter, decide, o
                 <span className="needs-go">Review</span>
               </button>
             )}
+            {!paused && signed && kind !== "hunt" && (
+              <div className="composer-actions">
+                <button className="chip btnlike" disabled={acting} onClick={runCheck}>
+                  {acting ? <span className="spinner" /> : <Icon name={kind === "routine" ? "store" : "sparkles"} size={14} />}
+                  {kind === "routine" ? "Run this week's order" : "Find me one now"}
+                </button>
+                {kind === "routine" && <button className="chip btnlike quiet" onClick={nextWeek}>Skip to next week (demo)</button>}
+              </div>
+            )}
             <form className="composer-row" onSubmit={(e) => { e.preventDefault(); send(text); }}>
               <input className="input" value={text} onChange={(e) => setText(e.target.value)}
                 placeholder={mic.listening ? "Listening…" : `Message ${agent.name}`} aria-label={`Message ${agent.name}`} maxLength={600} />
@@ -392,7 +418,15 @@ function Intro({ state, agent, openDetails, setSheet, starters, send, busy }: {
   return (
     <section className="agent-intro" aria-label={`About ${agent.name}`}>
       <h2 className="headline">Hi, I'm {agent.name}.</h2>
-      {m ? (
+      {m && m.kind === "routine" ? (
+        <p className="subhead">
+          I do your weekly shop: <strong>{m.list?.length ?? 0} items</strong>, up to <strong>{money(m.maxUnitPrice)}</strong> a week. I buy each usual item where it's cheapest, ask once about better deals, and never swap without your OK.
+        </p>
+      ) : m && m.kind === "now" ? (
+        <p className="subhead">
+          I find <strong>{m.item}</strong> under <strong>{money(m.maxUnitPrice)}</strong> with delivery{m.withinMinutes ? `, arriving within ${m.withinMinutes} minutes` : ""}. I weigh price, delivery fee, rating and time, then make one pick.
+        </p>
+      ) : m ? (
         <p className="subhead">
           I look for <strong>{m.item}</strong>{brands ? ` from ${brands}` : ""}{m.required.size_us ? ` in size ${m.required.size_us}` : ""}, up to <strong>{money(m.maxUnitPrice)}</strong> each, until {new Date(m.expiresAt).toLocaleDateString([], { month: "short", day: "numeric" })}.
         </p>
@@ -433,6 +467,7 @@ function Message({ m, state, agent, tone, act, busy, decide, setSheet, showAvata
 }) {
   const proposal = m.proposalId ? state.proposals.find((p) => p.id === m.proposalId) : undefined;
   const purchase = m.purchaseId ? state.purchases.find((p) => p.id === m.purchaseId) : undefined;
+  const order = m.orderId ? (state.orders ?? []).find((o) => o.id === m.orderId) : undefined;
   const item = activeMandate(state, agent.id)?.mandate.item;
 
   if (m.from === "system") {
@@ -448,6 +483,7 @@ function Message({ m, state, agent, tone, act, busy, decide, setSheet, showAvata
           {m.text}
         </div>
         {purchase && <div id={`buy-${purchase.id}`}><PurchaseChip state={state} p={purchase} act={act} setSheet={setSheet} /></div>}
+        {order && <div id={`order-${order.id}`}>{order.kind === "weekly" ? <OrderCard state={state} o={order} act={act} /> : <NowCard o={order} act={act} />}</div>}
         {proposal && <div id={`prop-${proposal.id}`}><ProposalCard p={proposal} agentName={agent.name} busy={busy} onApprove={(auth) => decide(proposal.id, true, auth)} onDecline={() => decide(proposal.id, false)} /></div>}
         <span className={`caption muted ${mine ? "right" : ""}`}>{when(m.at)}</span>
       </div>
@@ -461,10 +497,13 @@ function PurchaseChip({ state, p, act, setSheet }: { state: AppState; p: Purchas
   if (p.status === "awaiting_look") {
     return <LookCard state={state} p={p} answer={(d) => act(() => api(`/api/purchases/${p.id}/look`, { decision: d }), d === "buy" ? "Buying it now." : "Skipped. Nothing was paid.")} />;
   }
+  if (p.status === "store_suggested" && p.storeOffer) return <StoreOfferCard p={p} act={act} />;
   const why = p.decision.violations.map((v) => v.detail);
   const check = p.status === "blocked" ? { icon: "shield" as const, tone: "danger", text: why[0] ? `Stopped by your rules: ${why[0]}` : "Stopped by your rules" }
     : p.status === "needs_approval" ? { icon: "hand" as const, tone: "warn", text: why[0] ? `Asking because ${why[0].charAt(0).toLowerCase()}${why[0].slice(1)}` : "Waiting for your approval" }
     : p.status === "skipped" ? { icon: "close" as const, tone: "warn", text: "You skipped it after a look. Nothing was paid." }
+    : p.status === "bought_in_store" ? { icon: "store" as const, tone: "ok", text: `Bought in store at ${p.storeOffer?.shop}: saved ${money(p.saved)}. Nothing paid through Pocket.` }
+    : p.saved !== undefined && p.usual !== undefined && p.saved > 0 ? { icon: "check" as const, tone: "ok", text: `Usually ${money(p.usual)} · saved ${money(p.saved)}` }
     : p.status === "failed" ? { icon: "alert" as const, tone: "danger", text: p.error ?? "PayPal couldn't complete the payment" }
     : { icon: "check" as const, tone: "ok", text: "Checked against your rules" };
   return (
@@ -602,7 +641,8 @@ function History({ list, setSheet }: { list: Purchase[]; setSheet: (s: SheetStat
 function Settings({ state, agent, act, setSheet }: { state: AppState; agent: Pocket; act: Act; setSheet: (s: SheetState) => void }) {
   const ex = state.exceptions.find((e) => e.agentId === agent.id);
   const history = state.retiredMandates.filter((m) => m.mandate.pocketId === agent.id).slice().reverse();
-  const set = (patch: Partial<Pocket>, ok: string) => act(() => api(`/api/agents/${agent.id}/settings`, patch), ok);
+  const set = (patch: Partial<Pocket> | Record<string, unknown>, ok: string) => act(() => api(`/api/agents/${agent.id}/settings`, patch), ok);
+  const kind = activeMandate(state, agent.id)?.mandate.kind ?? "hunt";
 
   return (
     <div className="stack">
@@ -638,6 +678,24 @@ function Settings({ state, agent, act, setSheet }: { state: AppState; agent: Poc
             {agent.lookFirstSec ? `Before each purchase, ${agent.name} sends you the photo and price, then waits ${agent.lookFirstSec >= 60 ? `${Math.round(agent.lookFirstSec / 60)} min` : `${agent.lookFirstSec} s`}. Skip it and nothing is paid.` : "Buys as soon as something fits the rules. Turn this on to get a heads-up first."}
           </p>
         </div>
+        {kind === "routine" && (
+          <div className="row between">
+            <span className="stack-xs grow">
+              <span className="headline">Always swap if cheaper and same size</span>
+              <span className="footnote muted">Skips the question for cheaper swaps. Anything that costs more still needs your PIN.</span>
+            </span>
+            <Switch on={!!agent.prefs?.autoSwapCheaper} onChange={() => set({ autoSwapCheaper: !agent.prefs?.autoSwapCheaper }, agent.prefs?.autoSwapCheaper ? "I'll ask before every swap." : "Cheaper same-size swaps happen automatically.")} label="Always swap if cheaper" />
+          </div>
+        )}
+        {kind === "hunt" && (
+          <div className="row between">
+            <span className="stack-xs grow">
+              <span className="headline">Check nearby shops</span>
+              <span className="footnote muted">If the same item is cheaper in a shop near you, I'll say so instead of paying online. (Simulated shops in this demo.)</span>
+            </span>
+            <Switch on={agent.checkNearby !== false} onChange={() => set({ checkNearby: agent.checkNearby === false }, agent.checkNearby === false ? "I'll check nearby shops." : "Online only.")} label="Check nearby shops" />
+          </div>
+        )}
         <button className="link-row" onClick={() => setSheet({ kind: "rename", id: agent.id })}>
           <Icon name="pencil" size={18} /><span className="grow">Name and colour</span><Icon name="chevronRight" size={16} />
         </button>
