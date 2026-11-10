@@ -1,6 +1,8 @@
+import type { ReactNode } from "react";
 import type { AppState, Mandate, Pocket, Proposal } from "../api";
 import { money } from "../api";
 import { Icon, type IconName } from "./Icon";
+import { Mark } from "./Brand";
 import { SignButton, type Signature } from "./lock";
 
 /** Kept so agents created earlier still have a colour on record. The UI no longer colour-codes agents. */
@@ -44,7 +46,32 @@ export function toneOf(agent: Pick<Pocket, "color"> | undefined, item?: string):
   return picked ? picked.id : agentTone(item);
 }
 
-export function AgentIcon({ item, size = 44, paused = false, tone }: { item?: string; size?: number; paused?: boolean; tone?: AgentTone }) {
+/**
+ * The agent's monogram: initials of its name ("Running shoe pocket" -> "RS"), skipping the word "pocket".
+ * Like a contact without a photo: unique to the agent, and it follows a rename.
+ */
+export function monogram(name: string) {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  const meaningful = words.filter((w) => !/^pocket$/i.test(w));
+  const use = meaningful.length ? meaningful : words;
+  const letters = use.slice(0, 2).map((w) => (/^\d+$/.test(w) ? w : w.charAt(0).toUpperCase())).join("");
+  return letters || "A";
+}
+
+/**
+ * The agent's avatar. With a name: a round monogram on the agent's gradient (identity, like a contact).
+ * Without one (a new agent still being set up): the job's icon in a rounded tile.
+ */
+export function AgentIcon({ item, name, size = 44, paused = false, tone }: { item?: string; name?: string; size?: number; paused?: boolean; tone?: AgentTone }) {
+  if (name) {
+    const m = monogram(name);
+    return (
+      <span className={`agent-icon mono ${tone ? `tone-${tone} toned` : ""} ${paused ? "paused" : ""}`}
+        style={{ width: size, height: size, fontSize: Math.round(size * (m.length > 1 ? 0.38 : 0.44)) }} aria-hidden="true">
+        {m}
+      </span>
+    );
+  }
   return (
     <span className={`agent-icon ${tone ? `tone-${tone} toned` : ""} ${paused ? "paused" : ""}`} style={{ width: size, height: size }} aria-hidden="true">
       <Icon name={paused ? "pause" : agentCategory(item)} size={Math.round(size * 0.5)} />
@@ -74,22 +101,75 @@ export function suggestPocketName(item: string | undefined, taken: string[]) {
   }
 }
 
+/** Whole dollars without ".00" ("$170"), cents only when there are some ("$12.40"). */
+export const amount = (n: number) => (Number.isInteger(n) ? `$${n.toLocaleString()}` : money(n));
+
+/**
+ * DEMO DATA, NOT REAL. Illustrative "saved this month" figures for the pitch, until the backend tracks each item's
+ * usual price (the weekly agent). Stable per agent so it doesn't jump around. Replace with real savings when the API has it.
+ */
+export function demoSavings(agentId: string) {
+  let h = 0;
+  for (const c of agentId) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return 6 + (h % 1900) / 100; // $6.00 to $24.99
+}
+
+/** What the card shows besides money: savings (demo) and how many risky buys the rules stopped (real). */
+export function cardStats(state: AppState, agentId: string) {
+  return {
+    saved: demoSavings(agentId),
+    stopped: state.purchases.filter((p) => p.pocketId === agentId && p.status === "blocked").length,
+  };
+}
+
 /**
  * The agent as a card (Apple Card style): a rich gradient in its colour with only the essentials on it.
+ * Top strip (visible even when cards overlap): emblem, name, job, money left. Bottom: proof it's working, and status.
  * White text; gradients are deep enough to pass contrast in both themes.
  */
-export function AgentCardFace({ agent, item, left, total, status }: { agent: Pick<Pocket, "name" | "color">; item?: string; left: number; total: number; status?: string }) {
+export function AgentCardFace({ agent, item, left, total, status, saved, stopped = 0, tone }: {
+  agent: Pick<Pocket, "name" | "color">; item?: string; left: number; total: number; status?: string;
+  saved?: number; stopped?: number; tone?: AgentTone;
+}) {
   return (
-    <span className={`agent-face tone-${toneOf(agent, item)}`}>
+    <span className={`agent-face tone-${tone ?? toneOf(agent, item)}`}>
       <span className="face-top">
-        <span className="face-emblem" aria-hidden="true"><Icon name={agentCategory(item)} size={34} stroke={1.6} /></span>
-        <span className="face-name">{agent.name}</span>
-        <span className="face-amount">{money(left)}</span>
+        <span className="face-emblem" aria-hidden="true"><Mark size={30} mono /></span>
+        <span className="face-id">
+          <span className="face-name">{agent.name}</span>
+          <span className="face-job">{item ? `${item.charAt(0).toUpperCase()}${item.slice(1)}` : "No job yet"}</span>
+        </span>
+        <span className="face-money">
+          <span className="face-amount">{amount(left)}</span>
+          <span className="face-cap">left of {amount(total)}</span>
+        </span>
       </span>
       <span className="face-bottom">
-        <span className="face-meta">{item ? `${item.charAt(0).toUpperCase()}${item.slice(1)}` : "No job yet"} · left of {money(total)}</span>
+        <span className="face-stats">
+          {saved !== undefined && <span className="face-stat"><Icon name="saved" size={15} stroke={2.2} />Saved {money(saved)} this month</span>}
+          {stopped > 0 && <span className="face-stat quiet"><Icon name="shield" size={14} stroke={2.2} />Stopped {stopped} risky {stopped === 1 ? "buy" : "buys"}</span>}
+        </span>
         {status && <span className="face-status">{status}</span>}
       </span>
+    </span>
+  );
+}
+
+/**
+ * Budget as a ring around the agent's badge, like Apple's Activity rings: it fills as money is spent,
+ * and turns orange near the limit, red at it. Decorative; the words next to it carry the meaning.
+ */
+export function BudgetRing({ left, total, size = 46, children }: { left: number; total: number; size?: number; children: ReactNode }) {
+  const used = total > 0 ? Math.min(1, Math.max(0, 1 - left / total)) : 0;
+  const r = (size - 4) / 2, c = 2 * Math.PI * r;
+  const tone = used >= 0.999 && total > 0 ? "full" : used > 0.85 ? "near" : "ok";
+  return (
+    <span className={`budget-ring ${tone}`} style={{ width: size, height: size }} aria-hidden="true">
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle className="ring-track" cx={size / 2} cy={size / 2} r={r} />
+        <circle className="ring-fill" cx={size / 2} cy={size / 2} r={r} strokeDasharray={c} strokeDashoffset={c * (1 - used)} transform={`rotate(-90 ${size / 2} ${size / 2})`} />
+      </svg>
+      <span className="ring-inner">{children}</span>
     </span>
   );
 }

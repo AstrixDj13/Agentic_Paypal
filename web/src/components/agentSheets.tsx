@@ -105,7 +105,7 @@ export function NewAgent({ state, act, close, open }: { state: AppState; act: Ac
   return (
     <div className="stack">
       <div className="new-agent-hero">
-        <AgentIcon item={d.draft?.item ?? (step >= 2 ? instruction : undefined)} tone={agentTone(d.draft?.item ?? (step >= 2 ? instruction : undefined))} size={64} />
+        <AgentIcon name={step === 3 ? shown : undefined} item={d.draft?.item ?? (step >= 2 ? instruction : undefined)} tone={agentTone(d.draft?.item ?? (step >= 2 ? instruction : undefined))} size={64} />
         <div className="stack-xs" style={{ alignItems: "center" }}>
           <strong className="title-2">{shown}</strong>
           <span className="caption muted">Step {step} of 3</span>
@@ -151,7 +151,7 @@ export function NewAgent({ state, act, close, open }: { state: AppState; act: Ac
             <p className="footnote muted">{askMode === "anything" ? "Every purchase waits for your approval." : "Buys on its own within the rules. Asks you when a limit is involved."}</p>
           </div>
           <div className="card summary-card">
-            <AgentIcon item={d.draft.item} tone={agentTone(d.draft.item)} size={36} />
+            <AgentIcon name={shown} item={d.draft.item} tone={agentTone(d.draft.item)} size={36} />
             <p className="footnote grow"><strong>{shown}</strong> gets <strong>{money(Number(amount))}</strong> to buy <span className="capitalize">{d.draft.item}</span>. If something doesn't fit your rules, it asks you first.</p>
           </div>
           <SignButton progress={{ working: `Setting up ${finalName}`, done: `${finalName} is ready` }} title={`Create ${shown}`} detail={`${money(Number(amount))} for one job: ${d.draft.item}`} approval={{ amount: Number(amount), rows: [{ label: "Agent", value: shown }, { label: "Job", value: d.draft.item }, { label: "Limits", value: limitsLine(d.draft) }, { label: "Asks you", value: askMode === "anything" ? "Before every purchase" : "When a limit is involved" }], note: "This amount moves into the agent's pocket. It can't spend more than this." }} onSigned={create} disabled={!finalName || taken || !(d.draft.maxUnitPrice > 0) || !d.draft.item.trim()}>Create agent</SignButton>
@@ -204,7 +204,7 @@ export function RenameAgent({ state, agentId, close, show, refresh }: {
   return (
     <form className="stack" onSubmit={(e) => { e.preventDefault(); if (clean && !taken && changed) submit(); }}>
       <div className="row" style={{ gap: 12 }}>
-        <AgentIcon item={item} tone={tone} size={48} />
+        <AgentIcon name={clean || agent.name} item={item} tone={tone} size={48} />
         <h2 className="title-2">Edit agent</h2>
       </div>
       <label className="field">Name
@@ -243,7 +243,7 @@ export function JobSheet({ state, agentId, act, close }: { state: AppState; agen
   return (
     <div className="stack">
       <div className="row" style={{ gap: 12 }}>
-        <AgentIcon item={current?.item} tone={toneOf(agent, current?.item)} size={40} />
+        <AgentIcon name={agent.name} item={current?.item} tone={toneOf(agent, current?.item)} size={40} />
         <h2 className="title-2">{current ? `Rewrite ${agent.name}'s job` : `Give ${agent.name} a job`}</h2>
       </div>
       {!d.draft ? (
@@ -289,7 +289,7 @@ export function MoveMoney({ state, agentId, act, close }: { state: AppState; age
             <div className="agent-picker">
               {sources.map((p) => (
                 <button key={p.id} className={`agent-pick ${fromId === p.id ? "on" : ""}`} aria-pressed={fromId === p.id} onClick={() => setFromId(p.id)}>
-                  <AgentIcon item={activeMandate(state, p.id)?.mandate.item} tone={toneOf(p, activeMandate(state, p.id)?.mandate.item)} size={32} />
+                  <AgentIcon name={p.name} item={activeMandate(state, p.id)?.mandate.item} tone={toneOf(p, activeMandate(state, p.id)?.mandate.item)} size={32} />
                   <span className="stack-xs"><strong className="footnote">{p.name}</strong><span className="caption muted">{money(p.balance)}</span></span>
                 </button>
               ))}
@@ -332,7 +332,7 @@ export function AgentMenu({ state, agentId, setSheet, show, refresh }: { state: 
   return (
     <div className="stack-sm">
       <div className="row" style={{ gap: 12 }}>
-        <AgentIcon item={activeMandate(state, a.id)?.mandate.item} tone={a.closedAt ? "grey" : toneOf(a, activeMandate(state, a.id)?.mandate.item)} size={40} paused={a.paused || !!a.closedAt} />
+        <AgentIcon name={a.name} item={activeMandate(state, a.id)?.mandate.item} tone={a.closedAt ? "grey" : toneOf(a, activeMandate(state, a.id)?.mandate.item)} size={40} paused={a.paused || !!a.closedAt} />
         <span className="stack-xs grow">
           <h2 className="title-2 ellipsis">{a.name}</h2>
           <span className="footnote muted">{a.closedAt ? `Closed ${new Date(a.closedAt).toLocaleDateString([], { month: "short", day: "numeric" })}` : `${money(a.balance)} left`}</span>

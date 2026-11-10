@@ -9,8 +9,9 @@ import { Icon, type IconName } from "../components/Icon";
 import { FeedItem, MandateChips, Receipt, StatusBadge, VerdictCard, purchaseApproval, approvePurchaseOrThrow, type Act } from "../components/purchase";
 import { Money, Segmented, Sheet, Toast } from "../components/ui";
 import { BlackBox, EvidenceSheet } from "./Console";
-import AgentPage from "./AgentPage";
-import { AgentCardFace, AgentIcon, BudgetBar, activeMandate, agentCategory, budgetOf, pendingFor, toneOf, unreadFor } from "../components/agent";
+import AgentPage, { AgentDetails } from "./AgentPage";
+import { SPRING, reducedMotion, launch, land, flyFrom } from "../motion";
+import { AgentCardFace, AgentIcon, BudgetBar, activeMandate, budgetOf, cardStats, pendingFor, toneOf, unreadFor } from "../components/agent";
 import { AgentMenu, CloseAgent, DeleteAgent, JobSheet, MoveMoney, NewAgent, RenameAgent } from "../components/agentSheets";
 import { LockScreen, SignButton, SignerProvider } from "../components/lock";
 
@@ -24,6 +25,7 @@ export type SheetState =
   | { kind: "move"; id: string }
   | { kind: "rename"; id: string }
   | { kind: "menu"; id: string }
+  | { kind: "details"; id: string }
   | { kind: "close"; id: string }
   | { kind: "delete"; id: string }
   | { kind: "purchase"; id: string }
@@ -43,27 +45,6 @@ const TAB_TITLE: Record<Tab, string> = { home: "Pocket", agents: "Agents", agent
 
 const tabFromPath = (p: string): Tab =>
   p.startsWith("/console") ? "blackbox" : /^\/agents\/?$/.test(p) ? "agents" : p.startsWith("/agents/") ? "agent" : p.startsWith("/activity") ? "activity" : "home";
-
-const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-
-/**
- * A real spring (stiffness 300, damping 30), sampled into a CSS linear() easing so the browser runs it on the
- * compositor. Falls back to an iOS-like curve where linear() isn't supported.
- */
-const SPRING = (() => {
-  const k = 300, c = 30, m = 1, dt = 1 / 120;
-  let x = 0, v = 0, t = 0;
-  const pts: number[] = [0];
-  while (t < 2) {
-    const a = (k * (1 - x) - c * v) / m;
-    v += a * dt; x += v * dt; t += dt;
-    if (Math.round(t * 120) % 2 === 0) pts.push(+x.toFixed(4));
-    if (Math.abs(1 - x) < 0.0008 && Math.abs(v) < 0.01) break;
-  }
-  const duration = Math.round(t * 1000);
-  const ok = typeof CSS !== "undefined" && CSS.supports?.("animation-timing-function", "linear(0, 1)");
-  return ok ? { easing: `linear(${pts.join(", ")}, 1)`, duration } : { easing: "cubic-bezier(0.32, 0.72, 0, 1)", duration: 500 };
-})();
 
 /**
  * The Agents screen as a layer pushed over Home (fintech/iOS style): it slides in from the right with a shadow on
@@ -196,7 +177,10 @@ export default function PocketApp() {
 
   // Every new page starts at the top. (An agent's chat scrolls itself to the latest message.)
   const [scrolled, setScrolled] = useState(false);
-  useEffect(() => { document.querySelector(".screen")?.scrollTo({ top: 0 }); setScrolled(false); }, [pathname]);
+  useEffect(() => {
+    if (!pathname.startsWith("/agents/")) document.querySelector(".screen")?.scrollTo({ top: 0 });
+    setScrolled(false);
+  }, [pathname]);
 
   const act: Act = async (fn, ok, opts) => {
     try {
@@ -287,6 +271,7 @@ export default function PocketApp() {
             {sheet.kind === "job" && <JobSheet state={state} agentId={sheet.id} act={act} close={close} />}
             {sheet.kind === "move" && <MoveMoney state={state} agentId={sheet.id} act={act} close={close} />}
             {sheet.kind === "rename" && <RenameAgent state={state} agentId={sheet.id} close={close} show={show} refresh={refresh} />}
+            {sheet.kind === "details" && <AgentDetails state={state} agentId={sheet.id} act={act} setSheet={setSheet} show={show} refresh={refresh} />}
             {sheet.kind === "menu" && <AgentMenu state={state} agentId={sheet.id} setSheet={setSheet} show={show} refresh={refresh} />}
             {sheet.kind === "close" && <CloseAgent state={state} agentId={sheet.id} close={close} show={show} refresh={refresh} />}
             {sheet.kind === "delete" && <DeleteAgent state={state} agentId={sheet.id} close={close} show={show} refresh={refresh} after={() => { if (tab === "agent") navigate("/agents"); }} />}
@@ -355,7 +340,7 @@ function Home({ state, act, setSheet, toggleKill, goActivity, openAgent, goAgent
                 const item = activeMandate(state, a.id)?.mandate.item;
                 return (
                   <span key={a.id} className={`peek-card tone-${toneOf(a, item)}`} style={{ "--i": i } as React.CSSProperties} aria-hidden="true">
-                    {i === pile.length - 1 && <Icon name={agentCategory(item)} size={22} stroke={1.8} />}
+                    {i === pile.length - 1 && <Mark size={22} mono />}
                   </span>
                 );
               })}
@@ -390,7 +375,7 @@ function Home({ state, act, setSheet, toggleKill, goActivity, openAgent, goAgent
       )}
       {suggesting.map((a) => (
         <button key={a.id} className="card action-row hero-glass" onClick={() => openAgent(a.id)}>
-          <AgentIcon item={activeMandate(state, a.id)?.mandate.item} tone={toneOf(a, activeMandate(state, a.id)?.mandate.item)} size={36} />
+          <AgentIcon name={a.name} item={activeMandate(state, a.id)?.mandate.item} tone={toneOf(a, activeMandate(state, a.id)?.mandate.item)} size={36} />
           <span className="grow stack-xs">
             <strong className="headline">{a.name} suggested a change</strong>
             <span className="footnote muted">Review it before anything changes.</span>
@@ -456,12 +441,32 @@ function AgentsTab({ state, setSheet, openAgent, show, refresh, back }: {
   const shown = open
     .filter((p) => !q.trim() || `${p.name} ${activeMandate(state, p.id)?.mandate.item ?? ""}`.toLowerCase().includes(q.trim().toLowerCase()))
     .sort((a, b) => rank(a) - rank(b));
-  const setPaused = async (id: string, name: string, paused: boolean) => {
-    try {
-      await api(`/api/agents/${id}/settings`, { paused });
-      show(paused ? `${name} paused. Nothing will be bought.` : `${name} resumed.`, false, { label: "Undo", run: () => { api(`/api/agents/${id}/settings`, { paused: !paused }).finally(refresh); } });
-    } catch (e) { show((e as Error).message, true); } finally { refresh(); }
+  const stackRef = useRef<HTMLDivElement>(null);
+
+  // Tap a card: it lifts, the others drop away, then it flies on to become the agent's header card.
+  const lift = (id: string, btn: HTMLElement) => {
+    const face = btn.querySelector<HTMLElement>(".agent-face");
+    if (!face || reducedMotion()) { openAgent(id); return; }
+    const others = [...(stackRef.current?.children ?? [])].filter((el) => el !== btn) as HTMLElement[];
+    others.forEach((el, i) => el.animate(
+      [{ opacity: 1, transform: "translate3d(0,0,0) scale(1)" }, { opacity: 0, transform: "translate3d(0,56px,0) scale(0.96)" }],
+      { duration: 200, delay: i * 18, easing: "cubic-bezier(0.4, 0, 1, 1)", fill: "forwards" }));
+    btn.style.zIndex = "4";
+    btn.animate([{ transform: "scale(1)" }, { transform: "scale(1.02)" }], { duration: 140, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)", fill: "forwards" });
+    setTimeout(() => { launch(id, face.getBoundingClientRect()); openAgent(id); }, 120);
   };
+
+  // Coming back from an agent: its card flies home into its slot; the rest of the wallet rises in around it.
+  useLayoutEffect(() => {
+    const f = land();
+    if (!f || reducedMotion()) return;
+    const btn = stackRef.current?.querySelector<HTMLElement>(`[data-agent="${f.id}"]`);
+    const face = btn?.querySelector<HTMLElement>(".agent-face");
+    if (face) flyFrom(face, f.rect);
+    [...(stackRef.current?.children ?? [])].filter((el) => el !== btn).forEach((el, i) => (el as HTMLElement).animate(
+      [{ opacity: 0, transform: "translate3d(0,40px,0)" }, { opacity: 1, transform: "translate3d(0,0,0)" }],
+      { duration: 420, delay: 80 + i * 35, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)", fill: "backwards" }));
+  }, []);
 
   return (
     <>
@@ -480,7 +485,7 @@ function AgentsTab({ state, setSheet, openAgent, show, refresh, back }: {
         </button>
       ) : (
         // A wallet: gradient cards, overlapping like Apple Wallet when there are several. Tap a card to open it.
-        <div className={`wallet-stack ${shown.length > 2 ? "overlap" : ""}`}>
+        <div ref={stackRef} className={`wallet-stack ${shown.length > 2 ? "overlap" : ""}`}>
           {shown.length === 0 && <p className="subhead muted">No agents match “{q}”.</p>}
           {shown.map((p) => {
             const m = activeMandate(state, p.id)?.mandate;
@@ -491,9 +496,9 @@ function AgentsTab({ state, setSheet, openAgent, show, refresh, back }: {
             const ended = m && Date.parse(m.expiresAt) < Date.now();
             const status = waiting ? "Needs you" : off ? "Paused" : ended ? "Job ended" : unread ? `${unread} new` : undefined;
             return (
-              <button key={p.id} className="agent-card wallet-item agent-row-main" data-agent={p.id} onClick={() => openAgent(p.id)}
+              <button key={p.id} className="agent-card wallet-item agent-row-main" data-agent={p.id} data-flight onClick={(e) => lift(p.id, e.currentTarget)}
                 aria-label={`${p.name}, ${money(b.left)} left of ${money(b.total)}${status ? `, ${status}` : ""}`}>
-                <AgentCardFace agent={p} item={m?.item} left={b.left} total={b.total} status={status} />
+                <AgentCardFace agent={p} item={m?.item} left={b.left} total={b.total} status={status} {...cardStats(state, p.id)} />
               </button>
             );
           })}
@@ -512,7 +517,7 @@ function AgentsTab({ state, setSheet, openAgent, show, refresh, back }: {
                 <div key={p.id} className="card closed-row">
                   <button className="agent-row-main" data-agent={p.id} onClick={() => openAgent(p.id)} aria-label={`${p.name}, closed`}>
                     <span className="row" style={{ gap: 12 }}>
-                      <AgentIcon item={activeMandate(state, p.id)?.mandate.item} tone="grey" size={36} paused />
+                      <AgentIcon name={p.name} item={activeMandate(state, p.id)?.mandate.item} tone="grey" size={36} paused />
                       <span className="grow stack-xs">
                         <strong className="headline ellipsis">{p.name}</strong>
                         <span className="caption muted">Closed {new Date(p.closedAt!).toLocaleDateString([], { month: "short", day: "numeric" })}</span>

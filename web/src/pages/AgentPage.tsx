@@ -1,35 +1,92 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
 import { api, money, when, type AppState, type ChatMessage, type FindResult, type Pocket, type Purchase } from "../api";
 import { Icon, type IconName } from "../components/Icon";
-import { AgentCardFace, AgentIcon, BudgetBar, ProposalCard, activeMandate, budgetOf, toneOf } from "../components/agent";
+import { AgentIcon, AgentCardFace, BudgetBar, BudgetRing, ProposalCard, activeMandate, agentStatus, amount, budgetOf, cardStats, toneOf } from "../components/agent";
+import { arrive, flyFrom, land, launch, reducedMotion } from "../motion";
 import { SignButton, type Signature } from "../components/lock";
-import { FeedItem, MandateChips, StatusBadge, purchaseApproval, approvePurchaseOrThrow, type Act } from "../components/purchase";
-import { Money, Segmented, Switch } from "../components/ui";
+import { FeedItem, StatusBadge, purchaseApproval, approvePurchaseOrThrow, type Act } from "../components/purchase";
+import { Money, Segmented } from "../components/ui";
 import type { SheetState } from "./PocketApp";
 import { RestoreButton } from "../components/agentSheets";
 
-type View = "overview" | "chat" | "activity";
+type Show = (t: string, e?: boolean, action?: { label: string; run: () => void }) => void;
+
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const brandsOf = (b?: string[]) => (b?.length ? b.map(cap).join(" or ") : "");
+
+/** Pause or resume one agent, always with Undo. */
+function usePause(agent: Pocket, show: Show, refresh: () => Promise<void> | void) {
+  const setPaused = async (paused: boolean) => {
+    try {
+      await api(`/api/agents/${agent.id}/settings`, { paused });
+      show(paused ? `${agent.name} paused. Nothing will be bought.` : `${agent.name} resumed.`, false, { label: "Undo", run: () => setPaused(!paused) });
+    } catch (e) { show((e as Error).message, true); } finally { refresh(); }
+  };
+  return setPaused;
+}
 
 /**
- * One agent's home. It opens on an overview (money, limits, what's waiting for you, settings),
- * like an account page. Chat is the second tab: the agent can only suggest changes there.
+ * One agent = one conversation, with the agent's card on top (like Apple Card's screen).
+ * The card arrives from the wallet, then collapses into a compact header (badge with a budget ring) as you scroll.
+ * Everything that isn't the conversation lives in Details.
  */
 export default function AgentPage({ state, agentId, act, refresh, show, setSheet, back }: {
   state: AppState; agentId: string; act: Act; refresh: () => Promise<void> | void;
-  show: (t: string, e?: boolean, action?: { label: string; run: () => void }) => void; setSheet: (s: SheetState) => void; back: () => void;
+  show: Show; setSheet: (s: SheetState) => void; back: () => void;
 }) {
   const agent = state.pockets.find((p) => p.id === agentId);
-  // Open straight on a view when asked (e.g. the Chat button on an agent card: ?view=chat).
-  const { search } = useLocation();
-  const [view, setView] = useState<View>(new URLSearchParams(search).get("view") === "chat" ? "chat" : "overview");
   const [busy, setBusy] = useState(false);
+  const topRef = useRef<HTMLDivElement>(null);
+  const heroRef = useRef<HTMLButtonElement>(null);
+  const compactRef = useRef<HTMLButtonElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
 
-  // Opening the chat marks the agent's messages as read.
+  // Being on the page means you've read its messages.
   const lastMsg = state.chats.filter((c) => c.agentId === agentId).at(-1)?.id;
   useEffect(() => {
-    if (agent && view === "chat") api(`/api/agents/${agentId}/read`, {}).catch(() => {});
-  }, [agentId, view, lastMsg, agent]);
+    if (agent) api(`/api/agents/${agentId}/read`, {}).catch(() => {});
+  }, [agentId, lastMsg, agent]);
+
+  // Arrival: the wallet card flies into the hero slot; the conversation rises in underneath it.
+  useLayoutEffect(() => {
+    const face = heroRef.current?.querySelector<HTMLElement>(".agent-face");
+    const f = land(agentId);
+    if (!face || !f || reducedMotion()) return;
+    flyFrom(face, f.rect);
+    // The thread fades (it holds the absolutely positioned composer); the head and composer also rise.
+    const thread = bodyRef.current?.querySelector(".thread");
+    arrive([topRef.current?.querySelector(".agent-head"), thread, bodyRef.current?.querySelector(".composer, .chat-closed")], 90, [thread]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentId]);
+
+  // Scroll: the hero card recedes and the compact header (ring, name, money left) takes over. Transform/opacity only.
+  useEffect(() => {
+    const screen = topRef.current?.closest<HTMLElement>(".screen");
+    const hero = heroRef.current, compact = compactRef.current, top = topRef.current;
+    if (!screen || !hero || !compact || !top) return;
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const span = Math.max(1, hero.offsetHeight - 24);
+      const p = Math.min(1, Math.max(0, screen.scrollTop / span));
+      // The card is gone by the time the header's name arrives, so the two never overlap.
+      hero.style.opacity = String(Math.max(0, 1 - 1.4 * p));
+      hero.style.transform = `scale(${1 - 0.06 * p})`;
+      const q = Math.min(1, Math.max(0, (p - 0.62) / 0.38));
+      compact.style.opacity = String(q);
+      compact.style.transform = `translate3d(0, ${(1 - q) * 10}px, 0)`;
+      compact.style.visibility = q < 0.02 ? "hidden" : "visible";
+      top.style.setProperty("--q", String(q));
+      // The bar behind Back and Details appears as soon as anything scrolls under it.
+      top.style.setProperty("--b", String(Math.min(1, screen.scrollTop / 16)));
+    };
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(update); };
+    update();
+    screen.addEventListener("scroll", onScroll, { passive: true });
+    return () => { screen.removeEventListener("scroll", onScroll); cancelAnimationFrame(raf); };
+  }, [agentId, !!agent]);
+
+  const setPaused = usePause(agent ?? ({ id: agentId, name: "" } as Pocket), show, refresh);
 
   if (!agent) {
     return (
@@ -39,8 +96,22 @@ export default function AgentPage({ state, agentId, act, refresh, show, setSheet
       </div>
     );
   }
-  const signed = activeMandate(state, agent.id);
-  const unread = state.chats.filter((c) => c.agentId === agent.id && c.from === "agent" && agent.lastReadAt && Date.parse(c.at) > Date.parse(agent.lastReadAt)).length;
+  const m = activeMandate(state, agent.id)?.mandate;
+  const tone = agent.closedAt ? "grey" : toneOf(agent, m?.item);
+  const b = budgetOf(state, agent);
+  const status = agentStatus(state, agent);
+  const doing = agent.closedAt ? "Closed" : status.text;
+  const off = state.killSwitch || agent.paused;
+  const openDetails = () => setSheet({ kind: "details", id: agent.id });
+  const cardStatus = agent.closedAt ? "Closed" : off ? "Paused" : status.text === "Waiting on you" ? "Needs you" : undefined;
+
+  // Back: the card flies home to its slot in the wallet (if it's still on screen).
+  const goBack = () => {
+    const face = heroRef.current?.querySelector<HTMLElement>(".agent-face");
+    const r = face?.getBoundingClientRect();
+    if (face && r && r.bottom > 80 && !reducedMotion()) launch(agent.id, r);
+    back();
+  };
 
   const decide = (id: string, approve: boolean, auth?: Signature) => {
     setBusy(true);
@@ -49,50 +120,108 @@ export default function AgentPage({ state, agentId, act, refresh, show, setSheet
 
   return (
     <>
-      {/* Header and view switch stay pinned while the page or chat scrolls. */}
-      <div className="agent-top">
-      <header className="agent-head">
-        <button className="icon-btn back-btn" aria-label="Back to agents" onClick={back}><Icon name="chevronLeft" size={22} /></button>
-        <AgentIcon item={signed?.mandate.item} tone={toneOf(agent, signed?.mandate.item)} size={44} paused={agent.paused} />
-        <div className="grow stack-xs">
-          <button className="name-btn" onClick={() => setSheet({ kind: "rename", id: agent.id })} aria-label={`${agent.name}. Edit name and colour`}>
-            <h1 className={`title-2 clamp-2 ${agent.name.length > 16 ? "long-name" : ""}`}>{agent.name}</h1><Icon name="pencil" size={15} />
+      {/* Pinned: Back, the compact identity (fades in once the card scrolls away), Details. */}
+      <div className="agent-top" ref={topRef}>
+        <header className="agent-head">
+          <button className="icon-btn back-btn" aria-label="Back to agents" onClick={goBack}><Icon name="chevronLeft" size={22} /></button>
+          <button className="agent-id" ref={compactRef} onClick={openDetails} aria-label={`${agent.name}. ${doing}. ${money(b.left)} left of ${money(b.total)}. Open details`}>
+            <BudgetRing left={b.left} total={b.total} size={44}>
+              <AgentIcon name={agent.name} item={m?.item} tone={tone} size={32} paused={agent.paused || !!agent.closedAt} />
+            </BudgetRing>
+            <span className="grow stack-xs id-text">
+              <span className="headline ellipsis">{agent.name}</span>
+              <span className="footnote muted ellipsis id-sub">
+                <strong className="id-money">{amount(b.left)} left</strong>
+                <span aria-hidden="true">·</span>
+                {!agent.closedAt && <span className={`presence-dot ${status.tone}`} aria-hidden="true" />}
+                {doing}
+              </span>
+            </span>
           </button>
-          <span className="footnote muted ellipsis capitalize">{agent.closedAt ? "Closed" : signed?.mandate.item ?? "No job yet"}</span>
-        </div>
-        <button className="icon-btn row-more-head" aria-label={`More options for ${agent.name}`} aria-haspopup="dialog" onClick={() => setSheet({ kind: "menu", id: agent.id })}>
-          <Icon name="more" size={22} stroke={3} />
-        </button>
-      </header>
-
-      <Segmented<View>
-        value={view}
-        onChange={setView}
-        options={[
-          { value: "overview", label: "Overview" },
-          { value: "chat", label: unread ? `Chat ${unread}` : "Chat" },
-          { value: "activity", label: "Activity" },
-        ]}
-      />
+          <button className="icon-btn row-more-head" aria-label={`Details for ${agent.name}`} aria-haspopup="dialog" onClick={openDetails}>
+            <Icon name="more" size={22} stroke={3} />
+          </button>
+        </header>
       </div>
 
-      {view === "overview" && <Overview state={state} agent={agent} act={act} busy={busy} decide={decide} setSheet={setSheet} openChat={() => setView("chat")} show={show} refresh={refresh} />}
-      {view === "chat" && <Chat state={state} agent={agent} act={act} refresh={refresh} show={show} setSheet={setSheet} busyOuter={busy} decide={decide} />}
-      {view === "activity" && <ActivityView state={state} agent={agent} setSheet={setSheet} />}
+      {/* The card itself, front and centre. Tap for Details. */}
+      <button className="agent-hero" ref={heroRef} data-flight onClick={openDetails} aria-label={`${agent.name}: ${money(b.left)} left of ${money(b.total)}. ${doing}. Open details`}>
+        <AgentCardFace agent={agent} item={m?.item} left={b.left} total={b.total} status={cardStatus} tone={tone} {...cardStats(state, agent.id)} />
+      </button>
+
+      <div ref={bodyRef} className="agent-body">
+        <Chat state={state} agent={agent} act={act} refresh={refresh} show={show} setSheet={setSheet} busyOuter={busy} decide={decide} openDetails={openDetails} setPaused={setPaused} />
+      </div>
     </>
   );
 }
 
+/* ====================================== Dictation ====================================== */
+
+type Recognition = {
+  lang: string; interimResults: boolean; continuous: boolean;
+  onresult: (e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void;
+  onend: () => void; onerror: (e: { error: string }) => void;
+  start: () => void; stop: () => void; abort: () => void;
+};
+
+/** Speech to text in the browser (Chrome, Safari). Words land in the box; you still review and tap Send. */
+function useDictation(onText: (t: string) => void, show: Show) {
+  const SR = typeof window !== "undefined" ? ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition) as (new () => Recognition) | undefined : undefined;
+  const [listening, setListening] = useState(false);
+  const rec = useRef<Recognition | null>(null);
+  useEffect(() => () => rec.current?.abort(), []);
+
+  const start = (base: string) => {
+    if (!SR) return;
+    try {
+      if (!localStorage.getItem("pp-mic-note")) {
+        show("Your browser turns speech into text. Nothing is sent until you tap Send.");
+        localStorage.setItem("pp-mic-note", "1");
+      }
+    } catch { /* storage blocked: skip the one-time note */ }
+    const r = new SR();
+    r.lang = navigator.language || "en-US";
+    r.interimResults = true;
+    r.continuous = false;
+    const prefix = base.trim() ? `${base.trim()} ` : "";
+    r.onresult = (e) => {
+      let t = "";
+      for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
+      onText(prefix + t);
+    };
+    r.onend = () => setListening(false);
+    r.onerror = (e) => {
+      setListening(false);
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") show("Microphone access is off. Allow it in your browser settings.", true);
+      else if (e.error === "no-speech") show("Didn't catch that. Tap the mic and try again.");
+      else if (e.error !== "aborted") show("Voice input isn't available right now.", true);
+    };
+    rec.current = r;
+    r.start();
+    setListening(true);
+  };
+  const stop = () => rec.current?.stop();
+  return { supported: !!SR, listening, start, stop };
+}
+
 /* ====================================== Chat ====================================== */
 
-function Chat({ state, agent, act, refresh, show, setSheet, busyOuter, decide }: {
-  state: AppState; agent: Pocket; act: Act; refresh: () => Promise<void> | void; show: (t: string, e?: boolean) => void; setSheet: (s: SheetState) => void;
-  busyOuter: boolean; decide: (id: string, approve: boolean, auth?: Signature) => unknown;
+type Item = { kind: "msg"; at: string; m: ChatMessage } | { kind: "buy"; at: string; p: Purchase };
+
+/** How many recent items show under the card at first; the rest are one tap away. */
+const RECENT = 4;
+
+function Chat({ state, agent, act, refresh, show, setSheet, busyOuter, decide, openDetails, setPaused }: {
+  state: AppState; agent: Pocket; act: Act; refresh: () => Promise<void> | void; show: Show; setSheet: (s: SheetState) => void;
+  busyOuter: boolean; decide: (id: string, approve: boolean, auth?: Signature) => unknown; openDetails: () => void;
+  setPaused: (paused: boolean) => void;
 }) {
   const [text, setText] = useState("");
   // The message being sent, and how many of your messages the thread had at that moment.
   const [pending, setPending] = useState<{ text: string; mineBefore: number } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const messages = state.chats.filter((c) => c.agentId === agent.id);
   const mine = messages.filter((m) => m.from === "user").length;
@@ -100,16 +229,40 @@ function Chat({ state, agent, act, refresh, show, setSheet, busyOuter, decide }:
   // stop drawing the local copy, or it shows twice.
   const echoPending = pending && mine <= pending.mineBefore ? pending.text : null;
   const signed = activeMandate(state, agent.id);
+  const tone = agent.closedAt ? "grey" : toneOf(agent, signed?.mandate.item);
+  const mic = useDictation(setText, show);
 
-  // Jump to the latest message on open, and follow new ones.
+  // The conversation is also the activity log: purchases no message mentions join the timeline at their time.
+  const mentioned = new Set(messages.map((m) => m.purchaseId).filter(Boolean));
+  // The agent's original "Hi, I'm…" greeting is replaced by the intro card, so it isn't said twice.
+  const greeting = messages[0]?.from === "agent" && /^Hi, I'm /.test(messages[0].text) ? messages[0].id : null;
+  const items: Item[] = [
+    ...messages.filter((m) => m.id !== greeting).map((m) => ({ kind: "msg" as const, at: m.at, m })),
+    ...state.purchases.filter((p) => p.pocketId === agent.id && !mentioned.has(p.id)).map((p) => ({ kind: "buy" as const, at: p.createdAt, p })),
+  ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  const hidden = showAll ? 0 : Math.max(0, items.length - RECENT);
+  const visible = items.slice(hidden);
+
+  // What needs you, pinned above the composer so it can't scroll away.
+  const needs = [
+    ...state.purchases.filter((p) => p.pocketId === agent.id && p.status === "needs_approval").map((p) => ({ id: `buy-${p.id}`, label: `Approve ${p.title}` })),
+    ...state.proposals.filter((p) => p.agentId === agent.id && p.status === "pending").map((p) => ({ id: `prop-${p.id}`, label: p.summary })),
+  ];
+
+  // Open with the card on top and the latest few items under it; follow new ones as they arrive.
+  const seen = useRef<number | null>(null);
   useLayoutEffect(() => {
     const el = endRef.current?.closest(".screen");
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [messages.length, pending]);
+    if (!el) return;
+    if (seen.current === null) el.scrollTop = 0;
+    else if (items.length > seen.current || pending) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    seen.current = items.length;
+  }, [items.length, pending]);
 
   const send = async (t: string) => {
     const msg = t.trim();
     if (!msg || busy) return;
+    if (mic.listening) mic.stop();
     setText("");
     setPending({ text: msg, mineBefore: mine });
     setBusy(true);
@@ -126,47 +279,140 @@ function Chat({ state, agent, act, refresh, show, setSheet, busyOuter, decide }:
     }
   };
 
-  const suggestions = [
+  const reveal = (id: string) => {
+    // Scroll only the conversation (scrollIntoView would also shift the phone frame and clip the header).
+    const go = () => {
+      const el = document.getElementById(id);
+      const screen = el?.closest<HTMLElement>(".screen");
+      if (!el || !screen) return;
+      const y = el.getBoundingClientRect().top - screen.getBoundingClientRect().top + screen.scrollTop - screen.clientHeight / 2 + el.offsetHeight / 2;
+      screen.scrollTo({ top: Math.max(0, y), behavior: reducedMotion() ? "auto" : "smooth" });
+      el.querySelector<HTMLButtonElement>("button.btn")?.focus({ preventScroll: true });
+    };
+    if (document.getElementById(id)) go();
+    else { setShowAll(true); requestAnimationFrame(() => requestAnimationFrame(go)); }
+  };
+
+  // Starter questions: only in an empty conversation (the mic and the box cover the rest).
+  const starters = mine === 0 && !agent.closedAt ? [
     "What are your rules?",
     signed ? "Check the store now" : null,
-    signed && state.channel3?.enabled ? "Find it in real stores" : null,
     signed ? `Go up to ${money(Math.round(signed.mandate.maxUnitPrice * 1.4))} just this once` : null,
-    state.pockets.some((p) => p.id !== agent.id && !p.closedAt) ? `Move $20 from ${state.pockets.find((p) => p.id !== agent.id && !p.closedAt)?.name}` : null,
-  ].filter(Boolean) as string[];
+  ].filter(Boolean) as string[] : [];
+
+  const showSend = !!text.trim() || !mic.supported || busy;
+  const paused = !agent.closedAt && (state.killSwitch || agent.paused);
 
   return (
     <>
       <div className="thread" aria-live="polite">
-        {messages.length === 0 && (
-          <div className="chat-empty">
-            <p className="subhead muted">{agent.name}</p>
-            <h2 className="large-title">Ask anything about this pocket</h2>
-            <p className="subhead muted">Its rules, what it's watching, or a change you want. Nothing changes until you approve it.</p>
+        {hidden > 0 ? (
+          <button className="earlier-btn" onClick={() => setShowAll(true)}>
+            <Icon name="up" size={14} />Show {hidden} earlier {hidden === 1 ? "item" : "items"}
+          </button>
+        ) : (
+          <Intro state={state} agent={agent} openDetails={openDetails} setSheet={setSheet} starters={starters} send={send} busy={busy} />
+        )}
+
+        {visible.map((it, i) => {
+          if (it.kind === "buy") return <div key={it.p.id} id={`buy-${it.p.id}`} className="timeline-buy"><PurchaseChip state={state} p={it.p} act={act} setSheet={setSheet} /></div>;
+          const prev = visible[i - 1];
+          const firstOfRun = !(prev?.kind === "msg" && prev.m.from === it.m.from);
+          return <Message key={it.m.id} m={it.m} state={state} agent={agent} tone={tone} act={act} busy={busy || busyOuter} decide={decide} setSheet={setSheet} showAvatar={firstOfRun} />;
+        })}
+
+        {echoPending && <div className="bubble-row me"><div className="bubble me">{echoPending}</div></div>}
+        {pending && (
+          <div className="bubble-row from-agent">
+            <span className="bubble-avatar"><AgentIcon name={agent.name} item={signed?.mandate.item} tone={tone} size={28} /></span>
+            <div className="stack-xs bubble-col">
+              <div className="bubble agent typing" aria-hidden="true"><i /><i /><i /></div>
+              <span className="caption muted">{agent.name} is checking your rules and the store</span>
+            </div>
           </div>
         )}
-        {messages.map((m) => <Message key={m.id} m={m} state={state} agent={agent} act={act} busy={busy || busyOuter} decide={decide} setSheet={setSheet} />)}
-        {echoPending && <div className="bubble-row me"><div className="bubble me">{echoPending}</div></div>}
-        {pending && <span className="sr-only" role="status">{agent.name} is checking your rules and the store.</span>}
         <div ref={endRef} />
       </div>
 
-      {agent.closedAt ? <div className="chat-closed" role="note">{agent.name} is closed. Restore it to chat again.</div> : <>
-      {/* The light hugs the box: 50% at rest, 5% while you type, and travels around the edge while the agent works. */}
-      <div className={`composer ${pending ? "is-working" : text.trim() ? "is-typing" : ""}`}>
-        <div className="composer-body">
-        <div className="suggest">
-          {suggestions.map((s) => <button key={s} className="chip btnlike" disabled={busy} onClick={() => send(s)}>{s}</button>)}
+      {agent.closedAt ? (
+        <div className="chat-closed" role="note">
+          <span>{agent.name} is closed. Its records stay.</span>
+          <RestoreButton state={state} agentId={agent.id} />
         </div>
-        <form className="composer-row" onSubmit={(e) => { e.preventDefault(); send(text); }}>
-          <input className="input" value={text} onChange={(e) => setText(e.target.value)} placeholder={`Message ${agent.name}`} aria-label={`Message ${agent.name}`} maxLength={600} />
-          <button className="icon-btn send-btn" type="submit" disabled={busy || !text.trim()} aria-label="Send">
-            {busy ? <span className="spinner" /> : <Icon name="send" size={18} />}
-          </button>
-        </form>
+      ) : (
+        /* The light hugs the box: 50% at rest, 5% while you type, and travels around the edge while the agent works or listens. */
+        <div className={`composer ${pending ? "is-working" : mic.listening ? "is-listening" : text.trim() ? "is-typing" : ""}`}>
+          <div className="composer-body">
+            {paused ? (
+              <div className="needs-strip paused" role="status">
+                <Icon name="pause" size={14} />
+                <span className="grow ellipsis">{state.killSwitch ? "All agents are paused from Home" : "Paused. Nothing will be bought."}</span>
+                {!state.killSwitch && <button className="needs-go as-btn" onClick={() => setPaused(false)}>Resume</button>}
+              </div>
+            ) : needs.length > 0 && (
+              <button className="needs-strip" onClick={() => reveal(needs[0].id)}>
+                <span className="needs-dot" aria-hidden="true" />
+                <span className="grow ellipsis"><strong>{needs.length === 1 ? "Needs you" : `${needs.length} things need you`}</strong> · {needs[0].label}</span>
+                <span className="needs-go">Review</span>
+              </button>
+            )}
+            <form className="composer-row" onSubmit={(e) => { e.preventDefault(); send(text); }}>
+              <input className="input" value={text} onChange={(e) => setText(e.target.value)}
+                placeholder={mic.listening ? "Listening…" : `Message ${agent.name}`} aria-label={`Message ${agent.name}`} maxLength={600} />
+              {showSend && (
+                <button className="icon-btn send-btn" type="submit" disabled={busy || !text.trim()} aria-label="Send">
+                  {busy ? <span className="spinner" /> : <Icon name="send" size={18} />}
+                </button>
+              )}
+              {mic.supported && !busy && (
+                <button type="button" className={`icon-btn mic-btn ${mic.listening ? "on" : ""}`} aria-pressed={mic.listening}
+                  aria-label={mic.listening ? "Stop listening" : "Speak a message"} onClick={() => (mic.listening ? mic.stop() : mic.start(text))}>
+                  <Icon name={mic.listening ? "stop" : "mic"} size={18} />
+                </button>
+              )}
+            </form>
+            {mic.listening && <span className="sr-only" role="status">Listening. Speak your message, then tap Send.</span>}
+          </div>
         </div>
-      </div>
-      </>}
+      )}
     </>
+  );
+}
+
+/** The agent introduces itself in its own words, built from the rules you signed. The start of every conversation. */
+function Intro({ state, agent, openDetails, setSheet, starters, send, busy }: {
+  state: AppState; agent: Pocket; openDetails: () => void; setSheet: (s: SheetState) => void;
+  starters: string[]; send: (t: string) => void; busy: boolean;
+}) {
+  const m = activeMandate(state, agent.id)?.mandate;
+  const brands = brandsOf(m?.allowed.brand);
+  const since = agent.createdAt ? new Date(agent.createdAt).toLocaleDateString([], { month: "short", day: "numeric" }) : null;
+  return (
+    <section className="agent-intro" aria-label={`About ${agent.name}`}>
+      <h2 className="headline">Hi, I'm {agent.name}.</h2>
+      {m ? (
+        <p className="subhead">
+          I look for <strong>{m.item}</strong>{brands ? ` from ${brands}` : ""}{m.required.size_us ? ` in size ${m.required.size_us}` : ""}, up to <strong>{money(m.maxUnitPrice)}</strong> each, until {new Date(m.expiresAt).toLocaleDateString([], { month: "short", day: "numeric" })}.
+        </p>
+      ) : (
+        <p className="subhead">I don't have a job yet. Tell me what to look for and I'll get started once you approve.</p>
+      )}
+      <ul className="intro-promises">
+        <li><Icon name="check" size={14} stroke={2.4} />{agent.askMode === "anything" ? "I ask you before every purchase." : "I ask you whenever money or a limit is involved."}</li>
+        <li><Icon name="lock" size={14} />Nothing changes until you approve it.</li>
+        <li><Icon name="box" size={14} />Every decision is recorded in your Black Box.</li>
+      </ul>
+      {starters.length > 0 && (
+        <div className="intro-starters">
+          {starters.map((s) => <button key={s} className="chip btnlike" disabled={busy} onClick={() => send(s)}>{s}</button>)}
+        </div>
+      )}
+      <div className="row intro-actions">
+        {m ? <button className="link-btn" onClick={openDetails}>See my rules</button>
+          : !agent.closedAt && <button className="btn sm primary" onClick={() => setSheet({ kind: "job", id: agent.id })}>Give it a job</button>}
+        {since && <span className="caption muted">With you since {since}</span>}
+      </div>
+    </section>
   );
 }
 
@@ -179,40 +425,55 @@ function sysIcon(text: string): IconName {
   return "lock";
 }
 
-function Message({ m, state, agent, act, busy, decide, setSheet }: {
-  m: ChatMessage; state: AppState; agent: Pocket; act: Act; busy: boolean; decide: (id: string, approve: boolean, auth?: Signature) => unknown; setSheet: (s: SheetState) => void;
+function Message({ m, state, agent, tone, act, busy, decide, setSheet, showAvatar }: {
+  m: ChatMessage; state: AppState; agent: Pocket; tone: string; act: Act; busy: boolean;
+  decide: (id: string, approve: boolean, auth?: Signature) => unknown; setSheet: (s: SheetState) => void; showAvatar: boolean;
 }) {
   const proposal = m.proposalId ? state.proposals.find((p) => p.id === m.proposalId) : undefined;
   const purchase = m.purchaseId ? state.purchases.find((p) => p.id === m.purchaseId) : undefined;
+  const item = activeMandate(state, agent.id)?.mandate.item;
 
   if (m.from === "system") {
     return <div className="sys-note"><Icon name={sysIcon(m.text)} size={13} /><span>{m.text} <span className="muted">· {when(m.at)}</span></span></div>;
   }
   const mine = m.from === "user";
   return (
-    <div className={`bubble-row ${mine ? "me" : ""}`}>
+    <div className={`bubble-row ${mine ? "me" : "from-agent"}`}>
+      {!mine && <span className="bubble-avatar" aria-hidden="true">{showAvatar && <AgentIcon name={agent.name} item={item} tone={tone as any} size={28} />}</span>}
       <div className="stack-sm bubble-col">
         <div className={`bubble ${mine ? "me" : "agent"}`}>
+          {!mine && <span className="sr-only">{agent.name}: </span>}
           {m.text}
         </div>
-        {purchase && <PurchaseChip state={state} p={purchase} act={act} onOpen={() => setSheet({ kind: "purchase", id: purchase.id })} />}
-        {proposal && <ProposalCard p={proposal} agentName={agent.name} busy={busy} onApprove={(auth) => decide(proposal.id, true, auth)} onDecline={() => decide(proposal.id, false)} />}
+        {purchase && <div id={`buy-${purchase.id}`}><PurchaseChip state={state} p={purchase} act={act} setSheet={setSheet} /></div>}
+        {proposal && <div id={`prop-${proposal.id}`}><ProposalCard p={proposal} agentName={agent.name} busy={busy} onApprove={(auth) => decide(proposal.id, true, auth)} onDecline={() => decide(proposal.id, false)} /></div>}
         <span className={`caption muted ${mine ? "right" : ""}`}>{when(m.at)}</span>
       </div>
     </div>
   );
 }
 
-function PurchaseChip({ state, p, act, onOpen }: { state: AppState; p: Purchase; act: Act; onOpen: () => void }) {
+/** A purchase in the conversation: what, how much, how it went, and proof it was checked and recorded. */
+function PurchaseChip({ state, p, act, setSheet }: { state: AppState; p: Purchase; act: Act; setSheet: (s: SheetState) => void }) {
+  const why = p.decision.violations.map((v) => v.detail);
+  const check = p.status === "blocked" ? { icon: "shield" as const, tone: "danger", text: why[0] ? `Stopped by your rules: ${why[0]}` : "Stopped by your rules" }
+    : p.status === "needs_approval" ? { icon: "hand" as const, tone: "warn", text: why[0] ? `Asking because ${why[0].charAt(0).toLowerCase()}${why[0].slice(1)}` : "Waiting for your approval" }
+    : p.status === "failed" ? { icon: "alert" as const, tone: "danger", text: p.error ?? "PayPal couldn't complete the payment" }
+    : { icon: "check" as const, tone: "ok", text: "Checked against your rules" };
   return (
     <div className="purchase-chip">
-      <button className="row between" onClick={onOpen} style={{ all: "unset", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+      <button className="chip-main" onClick={() => setSheet({ kind: "purchase", id: p.id })} aria-label={`${p.title}, ${money(p.total)}. Open receipt`}>
         <span className="stack-xs grow">
           <strong className="footnote ellipsis">{p.title}</strong>
           <StatusBadge status={p.status} />
         </span>
         <span className="num">{money(p.total)}</span>
       </button>
+      <div className={`chip-check ${check.tone}`}>
+        <Icon name={check.icon} size={14} />
+        <span className="grow">{check.text}</span>
+        <button className="link-btn" onClick={() => setSheet({ kind: "evidence", id: p.id })}>Black Box</button>
+      </div>
       {p.status === "needs_approval" && (
         <SignButton title="Approve purchase" detail={`${p.title} · ${money(p.total)}`} approval={purchaseApproval(state, p)} progress={{ working: "Paying with PayPal", done: `Paid ${money(p.total)}` }} onSigned={(auth) => act(() => approvePurchaseOrThrow(p.id, auth), undefined, { rethrow: true })}>Review and approve</SignButton>
       )}
@@ -220,60 +481,48 @@ function PurchaseChip({ state, p, act, onOpen }: { state: AppState; p: Purchase;
   );
 }
 
-/* ====================================== Overview ====================================== */
+/* ====================================== Details (sheet) ====================================== */
 
-function Overview({ state, agent, act, busy, decide, setSheet, openChat, show, refresh }: {
-  state: AppState; agent: Pocket; act: Act; busy: boolean; decide: (id: string, approve: boolean, auth?: Signature) => unknown; setSheet: (s: SheetState) => void; openChat: () => void;
-  show: (t: string, e?: boolean, action?: { label: string; run: () => void }) => void; refresh: () => Promise<void> | void;
+/** Everything about an agent that isn't the conversation: money, rules, this week, settings, history, close. */
+export function AgentDetails({ state, agentId, act, setSheet, show, refresh }: {
+  state: AppState; agentId: string; act: Act; setSheet: (s: SheetState) => void; show: Show; refresh: () => Promise<void> | void;
 }) {
+  const agent = state.pockets.find((p) => p.id === agentId);
+  const setPaused = usePause(agent ?? ({ id: agentId, name: "" } as Pocket), show, refresh);
+  if (!agent) return null;
   const b = budgetOf(state, agent);
   const m = activeMandate(state, agent.id)?.mandate;
-  const proposals = state.proposals.filter((x) => x.agentId === agent.id && x.status === "pending");
-  const approvals = state.purchases.filter((x) => x.pocketId === agent.id && x.status === "needs_approval");
-  const last = state.purchases.find((x) => x.pocketId === agent.id);
+  const all = state.purchases.filter((x) => x.pocketId === agent.id);
   const off = state.killSwitch || agent.paused;
+
   if (agent.closedAt) {
     return (
       <div className="stack">
+        <h2 className="title-2">{agent.name}</h2>
         <div className="card closed-note">
           <strong className="headline">Closed {new Date(agent.closedAt).toLocaleDateString([], { month: "short", day: "numeric" })}</strong>
           <p className="subhead muted">{agent.name} can't buy anything. Its purchases, receipts and Black Box records stay. Its {money(agent.balance)} budget comes back if you restore it.</p>
-          <RestoreButton state={state} agentId={agent.id} />
+          <RestoreButton state={state} agentId={agent.id} after={() => setSheet(null)} />
         </div>
-        {last && (
-          <section className="stack-sm">
-            <h2 className="section-title">Last activity</h2>
-            <FeedItem p={last} onOpen={() => setSheet({ kind: "purchase", id: last.id })} />
-          </section>
-        )}
+        {all.length > 0 && <History list={all} setSheet={setSheet} />}
       </div>
     );
   }
+
   // This week: purchase attempts per day (bought vs not), for the activity bars.
   const days = Array.from({ length: 7 }, (_, k) => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (6 - k)); return d; });
-  const mine = state.purchases.filter((x) => x.pocketId === agent.id);
   const week = days.map((d) => {
     const next = d.getTime() + 864e5;
-    const on = mine.filter((x) => { const t = Date.parse(x.createdAt); return t >= d.getTime() && t < next; });
+    const on = all.filter((x) => { const t = Date.parse(x.createdAt); return t >= d.getTime() && t < next; });
     return { d, tries: on.length, bought: on.filter((x) => x.status === "completed" || x.status === "resolved" || x.status === "disputed").length };
   });
   const tries = week.reduce((n, w) => n + w.tries, 0);
   const bought = week.reduce((n, w) => n + w.bought, 0);
   const peak = Math.max(1, ...week.map((w) => w.tries));
   const tone = toneOf(agent, m?.item);
-  const setPaused = async (paused: boolean) => {
-    try {
-      await api(`/api/agents/${agent.id}/settings`, { paused });
-      show(paused ? `${agent.name} paused. Nothing will be bought.` : `${agent.name} resumed.`, false, { label: "Undo", run: () => setPaused(!paused) });
-    } catch (e) { show((e as Error).message, true); } finally { refresh(); }
-  };
 
   return (
     <div className={`stack agent-overview tone-${tone}`}>
-      {/* The hero: the agent as a card */}
-      <div className="hero-face"><AgentCardFace agent={agent} item={m?.item} left={b.left} total={b.total} status={off ? "Paused" : undefined} /></div>
-
-      {/* Answer tiles: each one answers a single question */}
       <div className="bento">
         <div className="bento-tile">
           <span className="footnote muted">Left to spend</span>
@@ -287,7 +536,7 @@ function Overview({ state, agent, act, busy, decide, setSheet, openChat, show, r
             <>
               <ul className="rule-lines">
                 <li>Up to <strong>{money(m.maxUnitPrice)}</strong> each</li>
-                {m.allowed.brand?.length ? <li>{m.allowed.brand.map((x) => x.charAt(0).toUpperCase() + x.slice(1)).join(" or ")}</li> : null}
+                {m.allowed.brand?.length ? <li>{brandsOf(m.allowed.brand)}</li> : null}
                 {m.required.size_us ? <li>Size {m.required.size_us}</li> : null}
                 <li>Max {m.maxQuantity} at a time</li>
                 <li>Until {new Date(m.expiresAt).toLocaleDateString([], { month: "short", day: "numeric" })}</li>
@@ -315,43 +564,16 @@ function Overview({ state, agent, act, busy, decide, setSheet, openChat, show, r
         </div>
       </div>
 
-      {(proposals.length > 0 || approvals.length > 0) && (
-        <section className="stack-sm">
-          <h2 className="section-title">Waiting for you</h2>
-          {approvals.map((p) => <PurchaseChip key={p.id} state={state} p={p} act={act} onOpen={() => setSheet({ kind: "purchase", id: p.id })} />)}
-          {proposals.map((p) => <ProposalCard key={p.id} p={p} agentName={agent.name} busy={busy} onApprove={(auth) => decide(p.id, true, auth)} onDecline={() => decide(p.id, false)} />)}
-        </section>
-      )}
-
-      {/* The actions, once */}
-      <div className="action-pair">
-        <button className={`btn ${agent.paused ? "primary" : "caution"}`} onClick={() => setPaused(!agent.paused)}>
-          <Icon name={agent.paused ? "play" : "pause"} size={18} />{agent.paused ? "Resume" : "Pause"}
+      {!state.killSwitch && (
+        <button className={`btn block ${agent.paused ? "primary" : "caution"}`} onClick={() => setPaused(!agent.paused)}>
+          <Icon name={agent.paused ? "play" : "pause"} size={18} />{agent.paused ? `Resume ${agent.name}` : `Pause ${agent.name}`}
         </button>
-        <button className="btn tonal" onClick={openChat}><Icon name="chat" size={18} />Chat</button>
-      </div>
+      )}
       {state.killSwitch && <p className="footnote danger-text row" style={{ gap: 6 }}><Icon name="pause" size={14} />All agents are paused from Home. Nothing will be bought.</p>}
 
-      {mine.length > 0 && (
-        <section className="tx-card">
-          <h2 className="section-title">Latest purchases</h2>
-          {mine.slice(0, 4).map((x) => (
-            <button key={x.id} className="tx-row" onClick={() => setSheet({ kind: "purchase", id: x.id })}>
-              <span className="grow stack-xs">
-                <strong className="subhead ellipsis">{x.title}</strong>
-                <span className="caption muted">{when(x.createdAt)}</span>
-              </span>
-              <span className="stack-xs" style={{ alignItems: "flex-end" }}>
-                <span className="num">{money(x.total)}</span>
-                <StatusBadge status={x.status} />
-              </span>
-              <Icon name="chevronRight" size={16} className="muted" />
-            </button>
-          ))}
-        </section>
-      )}
+      <Settings state={state} agent={agent} act={act} setSheet={setSheet} />
 
-      <RulesView state={state} agent={agent} act={act} setSheet={setSheet} show={show} refresh={refresh} />
+      {all.length > 0 && <History list={all} setSheet={setSheet} />}
 
       <button className="link-row neutral" onClick={() => setSheet({ kind: "close", id: agent.id })}>
         <Icon name="archive" size={18} /><span className="grow">Close agent</span><Icon name="chevronRight" size={16} />
@@ -361,22 +583,19 @@ function Overview({ state, agent, act, busy, decide, setSheet, openChat, show, r
   );
 }
 
-/* ====================================== Rules & settings ====================================== */
+function History({ list, setSheet }: { list: Purchase[]; setSheet: (s: SheetState) => void }) {
+  return (
+    <section className="stack-sm">
+      <h3 className="section-title">Activity</h3>
+      {list.map((p) => <FeedItem key={p.id} p={p} onOpen={() => setSheet({ kind: "purchase", id: p.id })} />)}
+    </section>
+  );
+}
 
-function RulesView({ state, agent, act, setSheet, show, refresh }: {
-  state: AppState; agent: Pocket; act: Act; setSheet: (s: SheetState) => void;
-  show: (t: string, e?: boolean, action?: { label: string; run: () => void }) => void; refresh: () => Promise<void> | void;
-}) {
-  const signed = activeMandate(state, agent.id);
+function Settings({ state, agent, act, setSheet }: { state: AppState; agent: Pocket; act: Act; setSheet: (s: SheetState) => void }) {
   const ex = state.exceptions.find((e) => e.agentId === agent.id);
   const history = state.retiredMandates.filter((m) => m.mandate.pocketId === agent.id).slice().reverse();
   const set = (patch: Partial<Pocket>, ok: string) => act(() => api(`/api/agents/${agent.id}/settings`, patch), ok);
-  const setPaused = async (paused: boolean) => {
-    try {
-      await api(`/api/agents/${agent.id}/settings`, { paused });
-      show(paused ? `${agent.name} paused. Nothing will be bought.` : `${agent.name} resumed.`, false, { label: "Undo", run: () => setPaused(!paused) });
-    } catch (e) { show((e as Error).message, true); } finally { refresh(); }
-  };
 
   return (
     <div className="stack">
@@ -402,10 +621,10 @@ function RulesView({ state, agent, act, setSheet, show, refresh }: {
           </p>
         </div>
         <button className="link-row" onClick={() => setSheet({ kind: "rename", id: agent.id })}>
-          <Icon name="pencil" size={18} /><span className="grow">Name and colour</span><span className="footnote muted">{agent.name}</span><Icon name="chevronRight" size={16} />
+          <Icon name="pencil" size={18} /><span className="grow">Name and colour</span><Icon name="chevronRight" size={16} />
         </button>
         <button className="link-row" onClick={() => setSheet({ kind: "move", id: agent.id })}>
-          <Icon name="swap" size={18} /><span className="grow">Move money to {agent.name}</span><Icon name="chevronRight" size={16} />
+          <Icon name="swap" size={18} /><span className="grow">Add money from another agent</span><Icon name="chevronRight" size={16} />
         </button>
       </div>
 
@@ -423,12 +642,4 @@ function RulesView({ state, agent, act, setSheet, show, refresh }: {
       )}
     </div>
   );
-}
-
-/* ====================================== Activity ====================================== */
-
-function ActivityView({ state, agent, setSheet }: { state: AppState; agent: Pocket; setSheet: (s: SheetState) => void }) {
-  const list = state.purchases.filter((p) => p.pocketId === agent.id);
-  if (!list.length) return <div className="card empty"><p className="subhead muted">{agent.name} hasn't tried to buy anything yet.</p></div>;
-  return <div className="stack">{list.map((p) => <FeedItem key={p.id} p={p} onOpen={() => setSheet({ kind: "purchase", id: p.id })} />)}</div>;
 }
