@@ -148,7 +148,7 @@ select.input { background-image: linear-gradient(45deg, transparent 50%, var(--t
   background: color-mix(in srgb, var(--text-muted) 35%, var(--surface-2));
   transition: background 0.2s ease;
 }
-.switch .knob { position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: #fff; box-shadow: 0 3px 8px rgba(0, 0, 0, 0.18), 0 1px 1px rgba(0, 0, 0, 0.1); transition: left 0.22s cubic-bezier(0.3, 1.4, 0.5, 1); }
+.switch .knob { position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: #fff; box-shadow: 0 3px 8px rgba(0, 0, 0, 0.18), 0 1px 1px rgba(0, 0, 0, 0.1); transition: left 0.22s cubic-bezier(0.32, 0.72, 0, 1); }
 .switch.on { background: var(--switch-on); }
 .switch.on .knob { left: 22px; }
 
@@ -709,10 +709,10 @@ select.input { background-image: linear-gradient(45deg, transparent 50%, var(--t
 .progress-ov.error .ov-pill { border-color: rgba(255, 107, 94, 0.55); }
 @keyframes pill-in { from { opacity: 0; transform: translateY(8px) scale(0.96); } }
 .ov-spin { flex: none; width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.3); border-top-color: #fff; animation: spin 0.8s linear infinite; }
-.ov-icon { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; animation: pop 0.4s cubic-bezier(0.2, 1.5, 0.4, 1) both; }
+.ov-icon { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; animation: pop 0.36s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
 .ov-icon.ok { background: #fff; color: #0b1324; }
 .ov-icon.err { background: #ff6b5e; color: #1a0503; }
-@keyframes pop { from { transform: scale(0.4); opacity: 0; } }
+@keyframes pop { from { transform: scale(0.7); opacity: 0; } }
 .ov-note { max-width: 280px; font-size: var(--text-sm); color: rgba(255, 255, 255, 0.78); }
 .ov-close { --cta-bg: #f6f1e6; --cta-fg: #0b1324; }
 
@@ -1451,3 +1451,20 @@ html.app-locked, html.app-locked body { overflow: hidden; overscroll-behavior: n
 .upd-flag.needs { background: var(--warn); }
 .upd-flag.new { background: var(--brand-blue); }
 .upd-clear { display: flex; align-items: center; gap: 6px; justify-content: center; }
+
+/* ------------------------------------ Design audit fixes (Impeccable + unslop) ------------------------------------ */
+/* 1. Count badges: a red deep enough for a white number to read (5.9:1) in both themes */
+.bell-count, .dot-badge { background: #c2291d; }
+/* 3. Activity shows a plain dot; the number lives on the bell */
+.dot-badge.dot-only { min-width: 10px; width: 10px; height: 10px; padding: 0; top: -2px; right: -4px; border-width: 2px; }
+/* 2. Active tab label: a darker blue on its light-blue pill (light mode) */
+@media (prefers-color-scheme: light) { .tabbar button.on { color: #0058b8; } }
+/* 6. Section headings in Updates: sentence case, no spaced-out capitals */
+.upd-head { text-transform: none; letter-spacing: 0; font-size: var(--text-md); color: var(--text); }
+/* 7. Small text on agent cards stays readable over the lighter part of the gradient */
+.face-job, .face-cap { color: rgba(255, 255, 255, 0.92); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.28); }
+.face-name, .face-amount, .face-stat { text-shadow: 0 1px 2px rgba(0, 0, 0, 0.22); }
+/* 8. Muted text on Home's navy top belongs to the navy: a cool blue-grey, not neutral grey */
+@media (prefers-color-scheme: dark) { .home-screen .hero .muted { color: #a9bce0; } }
+/* 10. Chat header: a solid bar in the page colour once content scrolls under it, so nothing ghosts through */
+.agent-top::before, .agent-top::after { background: var(--bg); -webkit-backdrop-filter: blur(24px) saturate(160%); backdrop-filter: blur(24px) saturate(160%); }

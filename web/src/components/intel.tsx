@@ -66,7 +66,7 @@ export const LOOK_OPTIONS: { value: string; label: string }[] = [
 export function SuggestionCard({ s, onUse, onDismiss, compact }: { s: AgentSuggestion; onUse: (p: AgentPrefill) => void; onDismiss?: () => void; compact?: boolean }) {
   return (
     <div className={`suggest-card ${compact ? "compact" : ""}`}>
-      {s.imageUrl ? <img src={s.imageUrl} alt="" /> : <span className="look-ph"><Icon name="sparkles" size={22} /></span>}
+      {s.imageUrl ? <img src={s.imageUrl} alt="" /> : <span className="look-ph"><Icon name="bag" size={22} /></span>}
       <span className="grow stack-xs">
         <strong className="headline clamp-2">{s.title}</strong>
         <span className="footnote muted">{s.why}</span>
@@ -94,7 +94,7 @@ export function NoticedCard({ onUse, onOpenKnows, onSnap }: { onUse: (p: AgentPr
         <SuggestionCard s={top} onUse={onUse} onDismiss={async () => { await api("/api/intel/dismiss", { key: top.key }); refresh(); }} />
       ) : (
         <button className="card suggest-empty" onClick={onOpenKnows}>
-          <Icon name="sparkles" size={20} />
+          <Icon name="eye" size={20} />
           <span className="grow stack-xs" style={{ textAlign: "left" }}>
             <strong className="subhead">Let your agents learn what you like</strong>
             <span className="footnote muted">Connect your browser or share products to Pocket. You see and control everything it learns.</span>
@@ -166,7 +166,7 @@ export function WantSheet({ result, photo, onMake }: { result: WantResult; photo
         </>
       ) : <p className="footnote muted">No listings found yet. An agent can keep watching for it.</p>}
       <div className="card summary-card">
-        <Icon name="sparkles" size={20} />
+        <Icon name="eye" size={20} />
         <p className="footnote grow">Suggested job: <strong>{result.instruction}</strong>. Uses what Pocket knows about your size and usual prices{result.refImage ? ", and searches with your photo" : ""}.</p>
       </div>
       <button className="btn primary block" onClick={() => onMake({ instruction: result.instruction, amount: result.amount, description: result.description || undefined, refImage: result.refImage })}>
@@ -234,7 +234,7 @@ export function RuleTips({ draft, apply }: { draft: MandateDraft; apply: (p: Par
   if (!tips.length) return null;
   return (
     <div className="tips">
-      <span className="caption muted row" style={{ gap: 6 }}><Icon name="sparkles" size={14} />From what Pocket knows about you</span>
+      <span className="caption muted row" style={{ gap: 6 }}><Icon name="eye" size={14} />From what Pocket knows about you</span>
       {tips.map((t) => (
         <button key={t.id} type="button" className="tip" onClick={() => apply(t.patch)}>
           <span className="grow stack-xs" style={{ textAlign: "left" }}><strong className="footnote">{t.text}</strong><span className="caption muted">{t.why}</span></span>
@@ -327,7 +327,7 @@ export function KnowsPage({ back, onUse, onSnap, show }: { back: () => void; onU
           <h2 className="section-title">Interests</h2>
           {p.interests.slice(0, 8).map((i) => (
             <div key={i.key} className="interest">
-              {i.imageUrl ? <img src={i.imageUrl} alt="" loading="lazy" /> : <span className="look-ph"><Icon name="sparkles" size={18} /></span>}
+              {i.imageUrl ? <img src={i.imageUrl} alt="" loading="lazy" /> : <span className="look-ph"><Icon name="bag" size={18} /></span>}
               <span className="grow stack-xs">
                 <strong className="footnote">{i.label}</strong>
                 <span className="caption muted">

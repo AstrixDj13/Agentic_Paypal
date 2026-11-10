@@ -328,7 +328,7 @@ export default function PocketApp() {
             <button key={t.tab} className={navTab === t.tab ? "on" : ""} aria-current={navTab === t.tab ? "page" : undefined} onClick={() => (t.tab === "agents" ? goAgents() : navigate(t.path))}>
               <span className="tab-ico">
                 <Icon name={t.icon} size={22} />
-                {t.tab === "activity" && pending > 0 && <span className="dot-badge">{pending}</span>}
+                {t.tab === "activity" && pending > 0 && <span className="dot-badge dot-only" aria-label={`${pending} to approve`} />}
               </span>
               {t.label}
             </button>
@@ -515,7 +515,7 @@ function Home({ state, act, setSheet, setKill, goActivity, openAgent, goAgents, 
           </button>
           <button className="tile tile-btn hero-glass" onClick={goBlackBox} aria-label={`Money back: ${money(moneyBack)}. Open Black Box.`}>
             <span className="caption muted row" style={{ gap: 6 }}><Icon name="undo" size={14} />Money back</span>
-            <span className={`tile-v num ${moneyBack > 0 ? "ok-text" : ""}`}>{money(moneyBack)}</span>
+            <span className={`tile-v num ${moneyBack > 0 ? "ok-text" : ""}`}>{amount(moneyBack)}</span>
           </button>
         </div>
       ))}

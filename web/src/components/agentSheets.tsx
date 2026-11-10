@@ -177,7 +177,7 @@ export function NewAgent({ state, act, close, open, prefill }: { state: AppState
 
       {step === 1 && (
         <div className="na-step" key="s1">
-          {prefill?.why && <p className="footnote muted row" style={{ gap: 6 }}><Icon name="sparkles" size={14} />Suggested because: {prefill.why.charAt(0).toLowerCase() + prefill.why.slice(1)}</p>}
+          {prefill?.why && <p className="footnote muted row" style={{ gap: 6 }}><Icon name="eye" size={14} />Suggested because: {prefill.why.charAt(0).toLowerCase() + prefill.why.slice(1)}</p>}
           <p className="subhead muted">How much can this agent spend? It can't spend more than this.</p>
           <div className="amount-input"><span>$</span><input className="input big" ref={focusAfterSheet} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} aria-label="Amount in US dollars" /></div>
           <div className="chips">
@@ -211,7 +211,7 @@ export function NewAgent({ state, act, close, open, prefill }: { state: AppState
           {keep.refImage && <p className="footnote muted row" style={{ gap: 8 }}><img className="ref-thumb" src={`/api/intel/image/${keep.refImage}`} alt="" />Your photo will be used to search too.</p>}
           {!prefill && ideas.length > 0 && kind === "hunt" ? (
             <div className="stack-sm">
-              <span className="caption muted row" style={{ gap: 6 }}><Icon name="sparkles" size={14} />Based on what you've been looking at</span>
+              <span className="caption muted row" style={{ gap: 6 }}><Icon name="eye" size={14} />Based on what you've been looking at</span>
               {ideas.map((s) => (
                 <SuggestionCard key={s.key} s={s} compact
                   onUse={(p) => { setInstruction(p.instruction); if (p.amount) setAmount(String(p.amount)); setKeep({}); }}

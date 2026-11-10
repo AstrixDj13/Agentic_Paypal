@@ -380,7 +380,7 @@ function Chat({ state, agent, act, refresh, show, setSheet, busyOuter, decide, o
             {!paused && signed && kind !== "hunt" && (
               <div className="composer-actions">
                 <button className="chip btnlike" disabled={acting} onClick={runCheck}>
-                  {acting ? <span className="spinner" /> : <Icon name={kind === "routine" ? "store" : "sparkles"} size={14} />}
+                  {acting ? <span className="spinner" /> : <Icon name={kind === "routine" ? "store" : "search"} size={14} />}
                   {kind === "routine" ? "Run this week's order" : "Find me one now"}
                 </button>
                 {kind === "routine" && <button className="chip btnlike quiet" onClick={nextWeek}>Skip to next week (demo)</button>}

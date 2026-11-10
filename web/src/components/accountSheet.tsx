@@ -98,7 +98,7 @@ export function AccountSheet({ state, email, signedIn, act, go, show }: {
           detail={push === "unsupported" ? "On iPhone, add Pocket to your Home Screen first" : push === "denied" ? "Blocked in your browser settings" : "Urgent asks, plus one weekly check-in"}
           trailing={push === "unsupported" || push === "denied" || push === null ? <span className="set-value">Off</span>
             : <Switch on={push === "on"} onChange={() => { if (!pushBusy) togglePush(); }} label="Notifications" />} />
-        <Row icon="sparkles" title="What Pocket knows" detail="What it learned, your check-in, and how to wipe it" onClick={() => go("/knows")} />
+        <Row icon="eye" title="What Pocket knows" detail="What it learned, your check-in, and how to wipe it" onClick={() => go("/knows")} />
       </section>
 
       {signedIn && (
