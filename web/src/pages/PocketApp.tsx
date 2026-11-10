@@ -12,6 +12,7 @@ import { Money, Segmented, Sheet, Toast } from "../components/ui";
 import { BlackBox, EvidenceSheet } from "./Console";
 import AgentPage, { AgentDetails } from "./AgentPage";
 import { SPRING, reducedMotion, launch, land, flyFrom } from "../motion";
+import { usePullToRefresh, useUpdateCheck, useViewportGuard } from "../standalone";
 import { AgentCardFace, AgentIcon, BudgetBar, activeMandate, budgetOf, cardStats, pendingFor, toneOf, unreadFor } from "../components/agent";
 import { AgentMenu, CloseAgent, DeleteAgent, JobSheet, MoveMoney, NewAgent, RenameAgent } from "../components/agentSheets";
 import { LockScreen, SignButton, SignerProvider } from "../components/lock";
@@ -240,6 +241,16 @@ export default function PocketApp() {
 
   const pending = state?.purchases.filter((p) => p.status === "needs_approval").length ?? 0;
 
+  // Installed app: the page can't be shifted off screen by the keyboard, pull down to refresh, and a reload offer
+  // when a newer version is deployed.
+  useViewportGuard();
+  const canPull = !!state && !sheet && (tab === "home" || tab === "agents" || tab === "activity" || tab === "blackbox" || tab === "knows");
+  const pullRef = usePullToRefresh(
+    () => (tab === "agents" ? document.querySelector<HTMLElement>(".push-layer") : mainRef.current),
+    refresh, canPull, tab,
+  );
+  useUpdateCheck(useCallback(() => show("A new version of Pocket is ready.", false, { label: "Reload", run: () => location.reload() }), [show]));
+
   return (
     <div className="stage">
       <div className={`device ${state?.killSwitch ? "paused" : ""} ${tab === "agent" ? "in-agent" : ""} ${sheet ? "sheet-open" : ""}`}>
@@ -255,6 +266,7 @@ export default function PocketApp() {
         {account.status === "ok" && (lock === "setup" || lock === "unlock") && <LockScreen mode={lock} onDone={unlocked} />}
         {(account.status === "checking" || (account.status === "ok" && lock === "checking")) && <div className="lock splash"><span className="lock-mark"><Mark size={44} /></span></div>}
         <SignerProvider>
+        <div className="ptr" ref={pullRef} aria-hidden="true"><span className="ptr-ring" /></div>
         {/* Compact bar: appears once the page scrolls. The full logo scrolls away with Home's content. */}
         {tab !== "agent" && (
           <div className={`topbar ${scrolled ? "on" : ""}`} aria-hidden={!scrolled}>

@@ -30,12 +30,13 @@ export function AccountButton({ email, onOpen }: { email?: string | null; onOpen
   );
 }
 
-function Row({ icon, tint, title, detail, onClick, trailing }: {
-  icon: IconName; tint: string; title: string; detail?: string; onClick?: () => void; trailing?: React.ReactNode;
+/** One settings row: a plain line icon (the app's one icon style, no coloured tiles), title, detail, and a value or chevron. */
+function Row({ icon, title, detail, onClick, trailing }: {
+  icon: IconName; title: string; detail?: string; onClick?: () => void; trailing?: React.ReactNode;
 }) {
   const body = (
     <>
-      <span className="set-ico" style={{ background: tint }} aria-hidden="true"><Icon name={icon} size={16} stroke={2.2} /></span>
+      <span className="set-ico" aria-hidden="true"><Icon name={icon} size={20} stroke={1.9} /></span>
       <span className="set-text">
         <span className="set-title">{title}</span>
         {detail && <span className="set-detail">{detail}</span>}
@@ -88,28 +89,28 @@ export function AccountSheet({ state, email, signedIn, act, toggleKill, go, show
       </div>
 
       <section className="set-group" aria-label="Spending">
-        <Row icon={state.killSwitch ? "play" : "pause"} tint="#ff9f0a" title="Pause all agents"
+        <Row icon={state.killSwitch ? "play" : "pause"} title="Pause all agents"
           detail={state.killSwitch ? "Nothing will be bought until you resume." : `${open} agent${open === 1 ? "" : "s"} can buy within their rules.`}
           trailing={<Switch on={!!state.killSwitch} onChange={toggleKill} label="Pause all agents" tone="danger" />} />
       </section>
 
       <section className="set-group" aria-label="Security">
-        <Row icon="lock" tint="#5e5ce6" title="PIN" detail={auth ? (auth.hasPin ? "Signs every payment and rule change" : "Not set up") : "…"}
+        <Row icon="lock" title="PIN" detail={auth ? (auth.hasPin ? "Signs every payment and rule change" : "Not set up") : "…"}
           trailing={<span className="set-value">{auth?.hasPin ? "On" : "Off"}</span>} />
-        <Row icon={unlock.icon} tint="#30b0c7" title={unlock.label} detail="A passkey on this device, instead of your PIN"
+        <Row icon={unlock.icon} title={unlock.label} detail="A passkey on this device, instead of your PIN"
           trailing={<span className="set-value">{auth ? (auth.biometrics ? "On" : "Off") : "…"}</span>} />
       </section>
 
       <section className="set-group" aria-label="Notifications and privacy">
-        <Row icon="bell" tint="#ff3b30" title="Notifications"
+        <Row icon="bell" title="Notifications"
           detail={push === "unsupported" ? "On iPhone, add Pocket to your Home Screen first" : push === "denied" ? "Blocked in your browser settings" : "Urgent asks, plus one weekly check-in"}
           trailing={push === "unsupported" || push === "denied" || push === null ? <span className="set-value">Off</span>
             : <Switch on={push === "on"} onChange={() => { if (!pushBusy) togglePush(); }} label="Notifications" />} />
-        <Row icon="sparkles" tint="#0a84ff" title="What Pocket knows" detail="What it learned, your check-in, and how to wipe it" onClick={() => go("/knows")} />
+        <Row icon="sparkles" title="What Pocket knows" detail="What it learned, your check-in, and how to wipe it" onClick={() => go("/knows")} />
       </section>
 
       <section className="set-group" aria-label="Records">
-        <Row icon="box" tint="#1c1c1e" title="Black Box" detail={`A tamper-proof record of every decision${records ? ` · ${records} purchase${records === 1 ? "" : "s"}` : ""}`} onClick={() => go("/console")} />
+        <Row icon="box" title="Black Box" detail={`A tamper-proof record of every decision${records ? ` · ${records} purchase${records === 1 ? "" : "s"}` : ""}`} onClick={() => go("/console")} />
       </section>
 
       {signedIn && (

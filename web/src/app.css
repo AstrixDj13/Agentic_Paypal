@@ -1334,7 +1334,6 @@ button.set-row:active { background: color-mix(in srgb, var(--text) 7%, transpare
 .set-chev { flex: none; color: var(--text-muted); opacity: 0.7; }
 .set-danger { justify-content: center; }
 .set-danger .set-title { color: var(--danger); font-weight: 600; }
-@media (prefers-color-scheme: dark) { .set-ico[style*="#1c1c1e"] { background: #3a3a3c !important; } }
 .acct-foot { text-align: center; margin-top: -8px; }
 
 /* Activity: the Black Box one tap away */
@@ -1343,3 +1342,22 @@ button.set-row:active { background: color-mix(in srgb, var(--text) 7%, transpare
 .bb-entry-ico { flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; color: #fff; background: linear-gradient(160deg, #3a3a3c, #1c1c1e); }
 /* Black Box page: a Back circle, as on Agents */
 .page-back { display: flex; margin-bottom: -4px; }
+
+/* ------------------------------------ Installed app: a page that can't drift, pull to refresh ------------------------------------ */
+/* Only the app's own scroll areas scroll. The page under them stays put, so the keyboard can't leave the tab bar or the
+   message box pushed below the screen (Android Chrome, installed app, where there's no refresh to recover). */
+html.app-locked, html.app-locked body { overflow: hidden; overscroll-behavior: none; }
+
+/* Pull to refresh: a small disc that follows your finger, then spins while the data reloads */
+.ptr { position: absolute; z-index: 30; top: calc(env(safe-area-inset-top) + 10px); left: 50%; width: 36px; height: 36px; border-radius: 50%;
+  display: grid; place-items: center; pointer-events: none; opacity: 0; transform: translate3d(-50%, -56px, 0);
+  background: var(--surface); box-shadow: 0 0 0 0.5px var(--border), 0 6px 16px rgba(0, 0, 0, 0.16); }
+.ptr-ring { width: 18px; height: 18px; border-radius: 50%; border: 2.25px solid color-mix(in srgb, var(--text-muted) 35%, transparent); border-top-color: var(--brand-blue); }
+.ptr.armed .ptr-ring { border-color: var(--brand-blue); border-top-color: transparent; }
+.ptr.spinning .ptr-ring { animation: ptr-spin 0.7s linear infinite; border-color: color-mix(in srgb, var(--brand-blue) 25%, transparent); border-top-color: var(--brand-blue); }
+@keyframes ptr-spin { to { transform: rotate(360deg); } }
+
+/* One icon language: plain line icons in the muted text colour, no coloured tiles. Colour is kept for meaning. */
+.set-ico { width: 24px; height: 30px; border-radius: 0; background: none; color: var(--text-muted); }
+.set-row + .set-row::before { left: 50px; }
+.bb-entry-ico { background: var(--surface-2); color: var(--text-muted); }
