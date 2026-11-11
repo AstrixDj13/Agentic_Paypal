@@ -10,6 +10,7 @@ import { LOOK_OPTIONS, LookCard } from "../components/intel";
 import { NowCard, OrderCard, StoreOfferCard } from "../components/orders";
 import type { SheetState } from "./PocketApp";
 import { RestoreButton } from "../components/agentSheets";
+import { BillAlertCard, SubPanel, pendingBillAlerts, subLine } from "../components/bills";
 
 type Show = (t: string, e?: boolean, action?: { label: string; run: () => void }) => void;
 
@@ -148,7 +149,7 @@ export default function AgentPage({ state, agentId, act, refresh, show, setSheet
 
       {/* The card itself, front and centre. Tap for Details. */}
       <button className="agent-hero" ref={heroRef} data-flight onClick={openDetails} aria-label={`${agent.name}: ${money(b.left)} left of ${money(b.total)}. ${doing}. Open details`}>
-        <AgentCardFace agent={agent} item={m?.item} left={b.left} total={b.total} status={cardStatus} tone={tone} {...cardStats(state, agent.id)} />
+        <AgentCardFace agent={agent} item={subLine(state, agent.id) ?? m?.item} left={b.left} total={b.total} status={cardStatus} tone={tone} {...cardStats(state, agent.id)} />
       </button>
 
       <div ref={bodyRef} className="agent-body">
@@ -237,7 +238,7 @@ function Chat({ state, agent, act, refresh, show, setSheet, busyOuter, decide, o
   // The conversation is also the activity log: purchases no message mentions join the timeline at their time.
   const mentioned = new Set(messages.map((m) => m.purchaseId).filter(Boolean));
   // The agent's original "Hi, I'm…" greeting is replaced by the intro card, so it isn't said twice.
-  const greeting = messages[0]?.from === "agent" && /^Hi, I'm /.test(messages[0].text) ? messages[0].id : null;
+  const greeting = messages[0]?.from === "agent" && (messages[0].intro || /^Hi, I'm /.test(messages[0].text)) ? messages[0].id : null;
   const items: Item[] = [
     ...messages.filter((m) => m.id !== greeting).map((m) => ({ kind: "msg" as const, at: m.at, m })),
     ...state.purchases.filter((p) => p.pocketId === agent.id && !mentioned.has(p.id)).map((p) => ({ kind: "buy" as const, at: p.createdAt, p })),
@@ -257,6 +258,7 @@ function Chat({ state, agent, act, refresh, show, setSheet, busyOuter, decide, o
       if (asks) return [{ id: `order-${o.id}`, label: `${asks} ${asks === 1 ? "question" : "questions"} on this week's order` }];
       return o.status === "needs_approval" ? [{ id: `order-${o.id}`, label: "Approve this week's order" }] : [];
     }),
+    ...pendingBillAlerts(state).filter((a) => a.agentId === agent.id).map((a) => ({ id: `alert-${a.id}`, label: a.title })),
   ];
 
   // Open with the card on top and the latest few items under it; follow new ones as they arrive.
@@ -330,7 +332,8 @@ function Chat({ state, agent, act, refresh, show, setSheet, busyOuter, decide, o
             <Icon name="up" size={14} />Show {hidden} earlier {hidden === 1 ? "item" : "items"}
           </button>
         ) : (
-          <Intro state={state} agent={agent} openDetails={openDetails} setSheet={setSheet} starters={starters} send={send} busy={busy} />
+          kind === "recurring" ? <SubPanel state={state} agent={agent} act={act} />
+            : <Intro state={state} agent={agent} openDetails={openDetails} setSheet={setSheet} starters={starters} send={send} busy={busy} />
         )}
 
         {visible.map((it, i) => {
@@ -377,7 +380,12 @@ function Chat({ state, agent, act, refresh, show, setSheet, busyOuter, decide, o
                 <span className="needs-go">Review</span>
               </button>
             )}
-            {!paused && signed && kind !== "hunt" && (
+            {!paused && signed && kind === "recurring" && (
+              <div className="composer-actions">
+                <button className="chip btnlike quiet" onClick={() => act(() => api("/api/bills/next-month", {}), "A month went by (simulated).")}><Icon name="clock" size={14} />Next month (demo)</button>
+              </div>
+            )}
+            {!paused && signed && kind !== "hunt" && kind !== "recurring" && (
               <div className="composer-actions">
                 <button className="chip btnlike" disabled={acting} onClick={runCheck}>
                   {acting ? <span className="spinner" /> : <Icon name={kind === "routine" ? "store" : "search"} size={14} />}
@@ -470,6 +478,7 @@ function Message({ m, state, agent, tone, act, busy, decide, setSheet, showAvata
   const proposal = m.proposalId ? state.proposals.find((p) => p.id === m.proposalId) : undefined;
   const purchase = m.purchaseId ? state.purchases.find((p) => p.id === m.purchaseId) : undefined;
   const order = m.orderId ? (state.orders ?? []).find((o) => o.id === m.orderId) : undefined;
+  const alert = m.alertId ? state.bills?.alerts.find((a) => a.id === m.alertId) : undefined;
   const item = activeMandate(state, agent.id)?.mandate.item;
 
   if (m.from === "system") {
@@ -486,6 +495,7 @@ function Message({ m, state, agent, tone, act, busy, decide, setSheet, showAvata
         </div>
         {purchase && <div id={`buy-${purchase.id}`}><PurchaseChip state={state} p={purchase} act={act} setSheet={setSheet} /></div>}
         {order && <div id={`order-${order.id}`}>{order.kind === "weekly" ? <OrderCard state={state} o={order} act={act} /> : <NowCard o={order} act={act} />}</div>}
+        {alert && <BillAlertCard state={state} a={alert} act={act} openProof={(id) => setSheet({ kind: "proof", id })} />}
         {proposal && <div id={`prop-${proposal.id}`}><ProposalCard p={proposal} agentName={agent.name} busy={busy} onApprove={(auth) => decide(proposal.id, true, auth)} onDecline={() => decide(proposal.id, false)} /></div>}
         <span className={`caption muted ${mine ? "right" : ""}`}>{when(m.at)}</span>
       </div>

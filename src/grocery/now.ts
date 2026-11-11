@@ -30,7 +30,7 @@ export function findNow(agentId: string): Order {
   };
   s.orders.push(order);
   recorder.append(m.id, "order_built", { orderId: order.id, kind: "now", pick: res.pick, alternatives: res.alternatives.map((a) => `${a.dish} · ${a.restaurant} · ${money(a.total)}`) });
-  postMessage(agentId, "agent", `My pick: ${res.pick.dish} from ${res.pick.restaurant}, ${money(res.pick.total)} with delivery, about ${res.pick.etaMin} min. Why: ${res.pick.why}`, { orderId: order.id, needsYou: true });
+  postMessage(agentId, "agent", "Here's my pick for right now.", { orderId: order.id, needsYou: true });
   saveState();
   return order;
 }

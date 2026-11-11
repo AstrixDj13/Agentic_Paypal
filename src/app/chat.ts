@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Mandate, Pocket } from "../core/types.ts";
 import type { MandateDraft } from "../agent/agents.ts";
+import { brandList } from "../core/format.ts";
 import { recorder } from "./ledger.ts";
 import { notify } from "../intel/push.ts";
 import {
@@ -85,7 +86,7 @@ export function diffFor(m: Mandate, c: RuleChanges): DiffRow[] {
   const rows: DiffRow[] = [];
   if (c.maxUnitPrice !== undefined) rows.push({ label: "Price limit", from: money(m.maxUnitPrice), to: money(c.maxUnitPrice) });
   if (c.maxQuantity !== undefined) rows.push({ label: "Max quantity", from: String(m.maxQuantity), to: String(c.maxQuantity) });
-  if (c.brands) rows.push({ label: "Brands", from: (m.allowed.brand ?? ["any"]).join(" / "), to: c.brands.join(" / ") });
+  if (c.brands) rows.push({ label: "Brands", from: m.allowed.brand?.length ? brandList(m.allowed.brand, "/") : "Any", to: brandList(c.brands, "/") });
   for (const [k, v] of Object.entries(c.required ?? {})) rows.push({ label: k === "size_us" ? "US size" : k.replace(/_/g, " "), from: m.required[k] ?? "any", to: v });
   if (c.expiresAt) rows.push({ label: "Expires", from: day(m.expiresAt), to: day(c.expiresAt) });
   if (c.item) rows.push({ label: "Job", from: m.item, to: c.item });
@@ -155,7 +156,7 @@ export function proposeTransfer(agentId: string, fromAgentId: string, amount: nu
 /** A whole new job (for an agent without one, or one you asked to switch jobs). */
 export function proposeJob(agentId: string, current: Mandate | undefined, instruction: string, draft: MandateDraft): Proposal {
   const d = (x?: string) => x ?? "–";
-  const brands = (a?: Record<string, string[]>) => a?.brand?.join(" / ") ?? "any";
+  const brands = (a?: Record<string, string[]>) => (a?.brand?.length ? brandList(a.brand, "/") : "Any");
   const rows: DiffRow[] = [
     { label: "Job", from: d(current?.item), to: draft.item },
     { label: "Price limit", from: current ? money(current.maxUnitPrice) : "–", to: money(draft.maxUnitPrice) },

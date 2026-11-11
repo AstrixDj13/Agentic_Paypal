@@ -12,8 +12,10 @@ import * as intel from "./intel/signals.ts";
 import { agentSuggestions, buildProfile, ruleTips } from "./intel/profile.ts";
 import * as push from "./intel/push.ts";
 import { shareLink, snap } from "./intel/snap.ts";
-import { buildCheckin, maybeWeeklyCheckin, sendCheckin } from "./intel/checkin.ts";
+import { buildCheckin, maybeWeeklyCheckin, sendCheckin, setCheckinSchedule } from "./intel/checkin.ts";
+import * as inbox from "./intel/inbox.ts";
 import * as routine from "./grocery/routine.ts";
+import * as bills from "./bills/bills.ts";
 import { placeNow } from "./grocery/now.ts";
 import { GROCERY_STORES, STARTER_LIST, catalogView } from "./grocery/catalog.ts";
 import * as store from "./store/catalog.ts";
@@ -162,6 +164,10 @@ app.post("/api/push/unsubscribe", route((req) => push.unsubscribe(req.body.endpo
 // Weekly check-in: one bundled notification instead of a ping per item. "Send now" is for the demo.
 app.get("/api/checkin", route(() => buildCheckin()));
 app.post("/api/checkin/send", route(() => sendCheckin()));
+app.post("/api/checkin/settings", route((req) => setCheckinSchedule(req.body.day, req.body.hour)));
+// Notifications list: read state is kept per user, so it follows the person across devices.
+app.get("/api/notifications", route(() => inbox.inbox()));
+app.post("/api/notifications/read", route((req) => inbox.markRead(req.body?.ids)));
 app.post("/api/push/test", route(async () => ({ sent: await push.notify({ title: "PayPal Pocket", body: "Notifications are on. Your agents will ask you here before they buy.", url: "/" }) })));
 
 /* ------------------------------ PIN & Face ID ------------------------------ */
@@ -170,9 +176,16 @@ app.post("/api/auth/pin", route((req) => (auth.setupPin(req.body.pin), auth.auth
 app.post("/api/auth/challenge", route(() => auth.newChallenge()));
 app.post("/api/auth/unlock", route((req) => (auth.requireSignature(req.body?.auth, origin(req)), { ok: true })));
 app.post("/api/auth/biometric", signed((req) => (auth.registerCredential(req.body.credential, origin(req)), auth.authStatus())));
+app.post("/api/auth/biometric/remove", signed((req) => auth.removeCredential(req.body.id)));
+// Changing the PIN must be signed with the current PIN itself (a passkey isn't enough).
+app.post("/api/auth/pin/change", route((req) => {
+  if (!req.body?.auth?.pin) throw new auth.AuthError("Enter your current PIN to change it.");
+  auth.requireSignature({ pin: req.body.auth.pin }, origin(req));
+  return auth.changePin(req.body.newPin);
+}));
 
 /* ------------------------------ App state ------------------------------ */
-app.get("/api/state", route(() => (sweepExceptions(), { ...publicState(), ai: llmStatus(), products: store.listProducts(), photoPresets: Object.keys(PHOTO_PRESETS), channel3: { enabled: channel3Enabled() } })));
+app.get("/api/state", route(() => (sweepExceptions(), { ...publicState(), bills: bills.billsView(), ai: llmStatus(), products: store.listProducts(), photoPresets: Object.keys(PHOTO_PRESETS), channel3: { enabled: channel3Enabled() } })));
 
 /* ------------------------------ Agents (pocket = agent) ------------------------------ */
 app.post("/api/agents", signed((req) => agentsSvc.createAgent(req.body)));
@@ -206,7 +219,13 @@ app.get("/api/paypal/return", async (_req, res) => {
 app.post("/api/pockets", route((req) => svc.createPocket(req.body.name, Number(req.body.amount))));
 app.post("/api/mandates/draft", route((req) => svc.draftMandate(String(req.body.instruction ?? ""))));
 app.post("/api/mandates", signed((req) => svc.signNewMandate(req.body.pocketId, req.body.instruction, req.body.draft)));
-app.post("/api/killswitch", route((req) => (svc.setKillSwitch(Boolean(req.body.on)), { killSwitch: loadState().killSwitch })));
+// Pausing everything only makes things safer, so it's unsigned. Resuming gives spending power back: PIN / Face ID.
+app.post("/api/killswitch", route((req) => {
+  const on = Boolean(req.body.on);
+  if (!on) auth.requireSignature(req.body?.auth, origin(req));
+  svc.setKillSwitch(on);
+  return { killSwitch: loadState().killSwitch };
+}));
 
 /* ------------------------------ Agent & purchases ------------------------------ */
 app.post("/api/agent/run", route((req) => svc.runAgent(req.body.mandateId, { mode: req.body.mode, productId: req.body.productId, baseUrl: baseUrl(req) })));
@@ -226,6 +245,21 @@ app.post("/api/orders/:id/stockout", route((req) => {
 app.post("/api/orders/:id/place", signed((req) => routine.placeOrder(req.params.id, "user")));
 app.post("/api/orders/:id/order-now", signed((req) => placeNow(req.params.id, Number(req.body.choice) || 0)));
 app.post("/api/agents/:id/next-week", route((req) => routine.nextWeek(req.params.id)));
+
+/* ------------------------------ Subscriptions and bills (simulated merchants) ------------------------------ */
+app.get("/api/bills", route(() => bills.billsView()));
+app.get("/api/bills/discover", route(() => bills.discover()));
+// Adding pockets signs their caps, so it needs the PIN / Face ID.
+app.post("/api/bills/add", signed((req) => bills.addSubs(req.body.items ?? (req.body.billerIds ?? []).map((billerId: string) => ({ billerId })))));
+app.post("/api/bills/next-month", route(() => bills.nextMonth()));
+app.get("/api/bills/alerts/:id/proof", route((req) => bills.proof(req.params.id)));
+app.post("/api/bills/alerts/:id/approve-price", signed((req) => bills.approveNewPrice(req.params.id)));
+app.post("/api/bills/alerts/:id/pay", signed((req) => bills.payBill(req.params.id)));
+app.post("/api/bills/alerts/:id/hold", route((req) => bills.holdBill(req.params.id)));
+app.post("/api/bills/alerts/:id/keep", route((req) => bills.keep(req.params.id)));
+// Cancelling only stops spending, so no PIN.
+app.post("/api/bills/:agentId/cancel", route((req) => bills.cancelSub(req.params.agentId, req.body?.alertId)));
+app.post("/api/bills/:agentId/cap", signed((req) => bills.setCap(req.params.agentId, req.body.cap, req.body.varyPct)));
 // In store: no money moves through Pocket. Online instead: only an in-rules purchase that was already found.
 app.post("/api/purchases/:id/store", route((req) => svc.resolveStore(req.params.id, req.body.decision === "online" ? "online" : "in_store")));
 

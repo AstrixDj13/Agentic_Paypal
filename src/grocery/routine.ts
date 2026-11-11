@@ -80,6 +80,8 @@ export function buildWeeklyOrder(agentId: string): Order {
   const week = agent.prefs?.week ?? 0;
   const open = s.orders.find((o) => o.agentId === agentId && o.kind === "weekly" && o.week === week && (o.status === "awaiting" || o.status === "needs_approval"));
   if (open) return open;
+  // A new week's order replaces any older one still waiting (the app shows those as "Replaced").
+  for (const o of s.orders) if (o.agentId === agentId && o.kind === "weekly" && (o.status === "awaiting" || o.status === "needs_approval")) o.status = "cancelled";
   if (s.orders.some((o) => o.agentId === agentId && o.kind === "weekly" && o.week === week && o.status === "placed")) {
     throw new UserError("This week's order is already placed. Skip to next week to plan the next one.");
   }
@@ -152,10 +154,11 @@ export function buildWeeklyOrder(agentId: string): Order {
   s.orders.push(order);
   recorder.append(m.id, "order_built", { orderId: order.id, week, total: order.total, usualTotal: order.usualTotal, lines: lines.map((l) => ({ item: l.name, kind: l.kind, chosen: l.chosen?.title, price: l.chosen?.price, ask: l.ask?.type, askStatus: l.ask?.status })) });
   const asks = pendingAsks(order);
-  const subs = lines.filter((l) => l.kind === "substitute").map((l) => l.chosen!.title);
-  const extra = subs.length ? ` Substituted ${subs.join(", ")} for sold-out items, within your rules.` : "";
-  const when = new Date(order.deadline!).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  postMessage(agentId, "agent", `${orderSummary(order)}${extra} ${asks.length ? `No reply by ${when} means your usual items.` : `It goes out at ${when} unless you change something.`}`, {
+  const blocked = asks.some((a) => a.ask!.type === "stockout");
+  const line = blocked ? "This week's order is ready. One item is sold out and needs you."
+    : asks.length ? "This week's order is ready. One question for you."
+    : "This week's order is ready.";
+  postMessage(agentId, "agent", line, {
     orderId: order.id, needsYou: asks.length > 0,
     // Only a stock-out that blocks the order is urgent enough to buzz the phone; swaps wait for the check-in.
     urgent: asks.some((a) => a.ask!.type === "stockout"),
@@ -247,7 +250,7 @@ export async function placeOrder(orderId: string, by: "user" | "deadline"): Prom
   // Auto-placing at the deadline still respects "ask me about anything".
   if (by === "deadline" && agent.askMode === "anything") {
     o.status = "needs_approval";
-    postMessage(agent.id, "agent", `${orderSummary(o)} Ready to go. You asked me to check with you first.`, { orderId: o.id, needsYou: true });
+    postMessage(agent.id, "agent", "This week's order is ready to go. You asked me to check with you first.", { orderId: o.id, needsYou: true });
     saveState();
     return o;
   }
@@ -313,7 +316,7 @@ export function nextWeek(agentId: string) {
   if (!agent) throw new UserError("Unknown agent.");
   agent.prefs ??= {};
   agent.prefs.week = (agent.prefs.week ?? 0) + 1;
-  for (const o of loadState().orders ?? []) if (o.agentId === agentId && o.status === "awaiting") o.status = "cancelled";
+  for (const o of loadState().orders ?? []) if (o.agentId === agentId && o.kind === "weekly" && (o.status === "awaiting" || o.status === "needs_approval")) o.status = "cancelled";
   postMessage(agentId, "system", `Demo: it's now week ${agent.prefs.week + 1}. Prices, deals and stock-outs have changed (simulated stores).`);
   saveState();
   return agent;

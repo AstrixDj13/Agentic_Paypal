@@ -26,7 +26,9 @@ export type EntryKind =
   | "transfer"
   | "order_built"
   | "order_answer"
-  | "in_store";
+  | "in_store"
+  | "bill_request"
+  | "bill_decision";
 
 export interface Entry {
   seq: number;

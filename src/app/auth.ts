@@ -32,9 +32,32 @@ export function authState(): AuthState {
   return s.auth;
 }
 
+/** credentialIds lets each device tell whether ITS passkey is registered (not just "some device has one"). */
 export function authStatus() {
   const a = authState();
-  return { hasPin: !!a.pinHash, biometrics: a.credentials.length > 0, lockedUntil: a.lockedUntil };
+  return { hasPin: !!a.pinHash, biometrics: a.credentials.length > 0, credentialIds: a.credentials.map((c) => c.id), lockedUntil: a.lockedUntil };
+}
+
+/** Change the PIN. The route requires the CURRENT PIN as the signature (not a passkey), so a leaked PIN can be replaced. */
+export function changePin(newPin: unknown) {
+  const a = authState();
+  if (!validPin(newPin)) throw new AuthError("The new PIN must be 4 digits.");
+  a.pinSalt = randomBytes(16).toString("hex");
+  a.pinHash = hashPin(newPin, a.pinSalt);
+  a.failed = 0;
+  delete a.lockedUntil;
+  saveState();
+  return authStatus();
+}
+
+/** Remove a registered passkey (Face ID / fingerprint) by its credential id. */
+export function removeCredential(id: unknown) {
+  const a = authState();
+  const before = a.credentials.length;
+  a.credentials = a.credentials.filter((c) => c.id !== String(id ?? ""));
+  if (a.credentials.length === before) throw new AuthError("That passkey isn't registered here.");
+  saveState();
+  return authStatus();
 }
 
 const hashPin = (pin: string, salt: string) => scryptSync(pin, salt, 32).toString("hex");

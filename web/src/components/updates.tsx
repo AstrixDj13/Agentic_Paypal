@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, money, when, type AppState } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { AgentIcon, activeMandate, toneOf } from "./agent";
+import { pendingBillAlerts } from "./bills";
 
 /**
  * Updates: one place for everything your agents told you, so a missed notification is never lost.
@@ -41,6 +42,7 @@ export function needsYou(state: AppState): Update[] {
     const title = o.kind === "now" ? `Your pick: ${o.pick?.dish ?? "ready"}` : asks ? `${asks} ${asks === 1 ? "question" : "questions"} on this week's order` : o.status === "needs_approval" ? "Approve this week's order" : "";
     if (title) out.push({ id: `order-${o.id}`, at: o.createdAt, agentId: o.agentId, title, detail: `${name(o.agentId)} · ${money(o.total)}`, open: { agent: o.agentId } });
   }
+  for (const a of pendingBillAlerts(state)) out.push({ id: `alert-${a.id}`, at: a.createdAt, agentId: a.agentId, title: a.title, detail: `${name(a.agentId)} · needs your decision`, open: { agent: a.agentId } });
   return out.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
 }
 
@@ -49,9 +51,9 @@ function earlier(state: AppState, pendingIds: Set<string>): Update[] {
   const since = Date.now() - 14 * DAY;
   const open = new Set(state.pockets.filter((p) => !p.closedAt).map((p) => p.id));
   const stillPending = (m: AppState["chats"][number]) =>
-    (m.purchaseId && pendingIds.has(m.purchaseId)) || (m.proposalId && pendingIds.has(m.proposalId)) || (m.orderId && pendingIds.has(m.orderId));
+    (m.purchaseId && pendingIds.has(m.purchaseId)) || (m.proposalId && pendingIds.has(m.proposalId)) || (m.orderId && pendingIds.has(m.orderId)) || (m.alertId && pendingIds.has(m.alertId));
   return state.chats
-    .filter((m) => m.from === "agent" && open.has(m.agentId) && Date.parse(m.at) >= since && !/^Hi, I'm\b/.test(m.text) && !stillPending(m))
+    .filter((m) => m.from === "agent" && open.has(m.agentId) && Date.parse(m.at) >= since && !m.intro && !/^Hi, I'm\b/.test(m.text) && !stillPending(m))
     .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
     .slice(0, 25)
     .map((m) => ({ id: m.id, at: m.at, agentId: m.agentId, title: state.pockets.find((p) => p.id === m.agentId)?.name ?? "Your agent", detail: m.text, open: { agent: m.agentId } }));

@@ -1,5 +1,6 @@
 import webpush from "web-push";
 import { loadState, saveState } from "../app/state.ts";
+import { needsYouCount, remember } from "./inbox.ts";
 
 /**
  * Real phone notifications (Web Push). Works on Android Chrome and on iPhone once the app is
@@ -56,10 +57,15 @@ export interface PushMessage {
   tag?: string;
   /** When set, the notification shows "Looks good" / "Skip" and the service worker answers directly. */
   look?: { purchaseId: string };
+  /** The "needs you" count for the app icon (filled in by notify). */
+  badge?: number;
 }
 
 /** Sends to every subscribed device. Dead subscriptions (404/410) are removed. Never throws. */
 export async function notify(msg: PushMessage): Promise<number> {
+  // Kept on the server either way, so the Updates list and read state follow the person across devices.
+  remember({ title: msg.title, body: msg.body, url: msg.url, tag: msg.tag });
+  msg.badge = needsYouCount();
   const st = ps();
   if (!st.subs.length) return 0;
   const contact = process.env.PUBLIC_URL || "https://localhost";

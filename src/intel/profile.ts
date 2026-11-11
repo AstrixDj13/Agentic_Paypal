@@ -65,7 +65,7 @@ export interface Profile {
   priceHabits: { category: Category; typical: number; max: number; why: string }[];
   flexibility?: { overPct: number; why: string };
   askHint?: { mode: "money" | "anything"; why: string };
-  avoidHints: { word: string; why: string }[];
+  avoidHints: { word: string; why: string; category: Category }[];
   signalCount: number;
 }
 
@@ -177,10 +177,15 @@ export function buildProfile(now = Date.now()): Profile {
   /* -------- avoid hints: things that went wrong before -------- */
   const avoidHints: Profile["avoidHints"] = [];
   const wrongSize = st.purchases.filter((p) => p.dispute && p.dispute.result.findings.some((f) => f.field.startsWith("size")));
-  if (wrongSize.length) avoidHints.push({ word: "kids", why: `${wrongSize.length} past order${wrongSize.length === 1 ? "" : "s"} arrived in the wrong size` });
-  const avoidUsed = new Map<string, number>();
-  [...st.mandates, ...st.retiredMandates].forEach((m) => (m.mandate.avoid ?? []).forEach((w) => avoidUsed.set(w, (avoidUsed.get(w) ?? 0) + 1)));
-  avoidUsed.forEach((n, w) => avoidHints.push({ word: w, why: `You excluded it in ${n} rule${n === 1 ? "" : "s"}` }));
+  if (wrongSize.length) avoidHints.push({ word: "kids", category: "shoes", why: `${wrongSize.length} past order${wrongSize.length === 1 ? "" : "s"} arrived in the wrong size` });
+  // An excluded word belongs to the kind of thing it was excluded from ("paprika" from a spice rule, not a shoe rule).
+  const avoidUsed = new Map<string, { n: number; category: Category }>();
+  [...st.mandates, ...st.retiredMandates].forEach((m) => (m.mandate.avoid ?? []).forEach((w) => {
+    const key = `${w}|${categoryOf(`${m.mandate.item} ${m.mandate.description ?? ""}`)}`;
+    const e = avoidUsed.get(key) ?? { n: 0, category: categoryOf(`${m.mandate.item} ${m.mandate.description ?? ""}`) };
+    e.n++; avoidUsed.set(key, e);
+  }));
+  avoidUsed.forEach((e, key) => avoidHints.push({ word: key.split("|")[0], category: e.category, why: `You excluded it in ${e.n} rule${e.n === 1 ? "" : "s"} for ${e.category}` }));
 
   return { sizes, brands, dislikedBrands, interests, priceHabits, flexibility, askHint, avoidHints, signalCount: sig.length };
 }
@@ -218,7 +223,7 @@ export function agentSuggestions(limit = 3): AgentSuggestion[] {
       const size = i.category === "shoes" ? p.sizes[0]?.size : undefined;
       const habit = p.priceHabits.find((h) => h.category === i.category);
       const cap = Math.ceil(Math.max(i.priceMax ?? 0, habit?.typical ?? 0, i.priceMin ?? 0) * 1.05 / 5) * 5 || 100;
-      const avoid = p.avoidHints.filter((a) => i.category === "shoes" || a.word !== "kids").slice(0, 1).map((a) => a.word);
+      const avoid = p.avoidHints.filter((a) => a.category === i.category).slice(0, 1).map((a) => a.word);
       const shops = i.domains.filter((d) => !/google|bing|duckduckgo/.test(d)).slice(0, 2);
       const times = (n: number) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);
       const parts = [
@@ -244,6 +249,8 @@ export interface RuleTip { id: string; text: string; why: string; patch: Partial
 
 /** Tips while reviewing a new rule: fill in what Pocket already knows, flag what looks off. */
 export function ruleTips(draft: MandateDraft): RuleTip[] {
+  // Tips are for one-time hunts. Right-now meals and the weekly shop have their own setup.
+  if (draft.kind === "now" || draft.kind === "routine") return [];
   const p = buildProfile();
   const tips: RuleTip[] = [];
   const cat = categoryOf(`${draft.item} ${draft.description ?? ""}`);
@@ -251,8 +258,11 @@ export function ruleTips(draft: MandateDraft): RuleTip[] {
   if (cat === "shoes" && size && !draft.required.size_us) {
     tips.push({ id: "size", text: `Add size ${size.size}`, why: `${size.why}.`, patch: { required: { ...draft.required, size_us: size.size } } });
   }
-  const liked = p.brands.filter((b) => !p.dislikedBrands.some((d) => d.brand === b.brand)).slice(0, 2).map((b) => b.brand);
-  const relevantLiked = liked.filter((b) => cat !== "shoes" || KNOWN_BRANDS.slice(0, 15).includes(b));
+  // Brands only from the same kind of thing: what you viewed or bought in this category.
+  const sameCat = new Set(p.interests.filter((i) => i.category === cat && i.brand).map((i) => i.brand!));
+  loadState().purchases.filter((x) => x.paypal && categoryOf(x.title) === cat && x.order.attributes.brand).forEach((x) => sameCat.add(x.order.attributes.brand.toLowerCase()));
+  const liked = p.brands.filter((b) => sameCat.has(b.brand) && !p.dislikedBrands.some((d) => d.brand === b.brand)).slice(0, 2).map((b) => b.brand);
+  const relevantLiked = cat === "other" ? [] : liked;
   if (!draft.allowed.brand?.length && relevantLiked.length) {
     tips.push({ id: "brands", text: `Only ${relevantLiked.map(titleCase).join(" or ")}`, why: `Your most-viewed and bought brand${relevantLiked.length > 1 ? "s" : ""}.`, patch: { allowed: { ...draft.allowed, brand: relevantLiked } } });
   }
@@ -265,7 +275,7 @@ export function ruleTips(draft: MandateDraft): RuleTip[] {
     tips.push({ id: "price", text: `Raise the limit to $${habit.typical}`, why: `What you usually pay for ${cat} is about $${habit.typical}; few listings will fit $${draft.maxUnitPrice}.`, patch: { maxUnitPrice: habit.typical } });
   }
   for (const a of p.avoidHints) {
-    if ((draft.avoid ?? []).includes(a.word) || (a.word === "kids" && cat !== "shoes")) continue;
+    if ((draft.avoid ?? []).includes(a.word) || a.category !== cat || cat === "other") continue;
     tips.push({ id: `avoid-${a.word}`, text: `Never buy "${a.word}"`, why: `${a.why}.`, patch: { avoid: [...(draft.avoid ?? []), a.word] } });
     break;
   }

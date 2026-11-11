@@ -1468,3 +1468,28 @@ html.app-locked, html.app-locked body { overflow: hidden; overscroll-behavior: n
 @media (prefers-color-scheme: dark) { .home-screen .hero .muted { color: #a9bce0; } }
 /* 10. Chat header: a solid bar in the page colour once content scrolls under it, so nothing ghosts through */
 .agent-top::before, .agent-top::after { background: var(--bg); -webkit-backdrop-filter: blur(24px) saturate(160%); backdrop-filter: blur(24px) saturate(160%); }
+
+
+/* ------------------------------ Subscriptions and bills ------------------------------ */
+.next7 { display: flex; flex-direction: column; gap: 10px; text-align: left; }
+.next7-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.next7-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 0; border: 0; border-top: 1px solid var(--border); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.next7-list li:first-child .next7-row { border-top: 0; }
+.next7-day { min-width: 64px; text-align: right; }
+.next7 .chip { align-self: flex-start; }
+.discovery-card .headline { line-height: 1.3; }
+.bill-pick { display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; }
+.bill-pick + .bill-pick { border-top: 1px solid var(--border); }
+.bill-pick.added { opacity: 0.6; cursor: default; }
+.bill-pick input[type="checkbox"] { width: 20px; height: 20px; flex: none; accent-color: var(--brand-blue); }
+.bill-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.bill-cap { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.bill-cap .input { width: 76px; text-align: right; padding: 6px 8px; }
+.bill-alert .link-btn.caption { align-self: flex-start; padding: 0; }
+.wallet-section { font-size: var(--text-footnote); font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 14px 4px 6px; }
+.wallet-stack > .wallet-section:first-child { margin-top: 0; }
+.sub-panel { text-align: left; }
+.sub-panel .ask-compare { margin: 4px 0; }
+.proof-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.proof-list li { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
+.new-bill-row { margin-top: 4px; text-align: left; }

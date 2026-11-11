@@ -1,6 +1,7 @@
 import { askJson } from "../ai/llm.ts";
 import type { Mandate, Pocket } from "../core/types.ts";
 import type { ChangeScope, ChatMessage, RuleChanges } from "../app/state.ts";
+import { brandList, niceDate } from "../core/format.ts";
 
 /**
  * What an agent says back in its chat. The model may *suggest* a proposal; it can never
@@ -37,7 +38,7 @@ export async function agentReply(text: string, ctx: BrainContext): Promise<Brain
   const ai = await askJson<any>(
     `You are "${ctx.agent.name}", a personal shopping agent inside PayPal Pocket. You have exactly one job and your own money.
 Today is ${now.toISOString().slice(0, 10)} (${now.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" })}).
-Your job and signed rules: ${m ? JSON.stringify({ job: m.item, required: m.required, allowedBrands: m.allowed.brand ?? "any", maxUnitPrice: m.maxUnitPrice, maxQuantity: m.maxQuantity, expires: m.expiresAt.slice(0, 10) }) : "none yet (ask the user to give you a job)"}
+Your job and signed rules: ${m ? JSON.stringify({ job: m.item, required: m.required, allowedBrands: m.allowed.brand?.length ? brandList(m.allowed.brand) : "any", maxUnitPrice: m.maxUnitPrice, maxQuantity: m.maxQuantity, expires: niceDate(m.expiresAt, now) }) : "none yet (ask the user to give you a job)"}
 Your balance: $${ctx.agent.balance}. Other agents (name: balance): ${ctx.others.map((o) => `${o.name}: $${o.balance}`).join(", ") || "none"}.
 
 What Pocket has learned about the user from their browsing and decisions: ${ctx.profile ?? "nothing yet"}.
@@ -48,6 +49,7 @@ Only propose when the user clearly asks for a change. Never propose more than th
 One agent, one job: if you have no job and the user asks you to buy something, propose a "job". If they ask for a different kind of item than your job, propose a new "job" (it replaces the old one). Use "rule_change" only to adjust limits of your current job.
 Never say you prepared something unless it is in "proposal". When you propose, say it is ready for them to approve with their PIN or Face ID.
 
+Write dates like "Nov 30" (never ISO dates) and brand names with capitals ("Nike or Adidas").
 Voice: calm and factual, like a bank notification. Lead with the outcome and the number. No emojis, no exclamation marks, no filler ("Great question", "I'd love to help").
 
 Return JSON: {"reply": string (max 2 short sentences, plain text),
@@ -149,9 +151,9 @@ export function rulesReply(text: string, ctx: BrainContext, now: Date): Omit<Bra
 
   if (/\b(rules?|job|allowed|what can you)\b/.test(t)) {
     if (!m) return { reply: `I don't have a job yet. Give me one and I'll follow it.` };
-    const brands = m.allowed.brand?.length ? `, brands ${m.allowed.brand.join(" or ")}` : "";
+    const brands = m.allowed.brand?.length ? `, ${brandList(m.allowed.brand)} only` : "";
     const req = Object.entries(m.required).map(([k, v]) => `${k === "size_us" ? "size" : k} ${v}`).join(", ");
-    return { reply: `My one job: ${m.item}${req ? `, ${req}` : ""}${brands}, up to $${m.maxUnitPrice} each, max ${m.maxQuantity}, until ${m.expiresAt.slice(0, 10)}.` };
+    return { reply: `My one job: ${m.item}${req ? `, ${req}` : ""}${brands}, up to $${m.maxUnitPrice} each, max ${m.maxQuantity}, until ${niceDate(m.expiresAt, now)}.` };
   }
   if (/\b(balance|money|how much|left|budget)\b/.test(t)) return { reply: `I have $${ctx.agent.balance} to spend.` };
 

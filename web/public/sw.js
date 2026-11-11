@@ -8,6 +8,10 @@ self.addEventListener("push", (event) => {
   let msg = {};
   try { msg = event.data ? event.data.json() : {}; } catch { msg = { title: "PayPal Pocket", body: event.data && event.data.text() }; }
   const actions = msg.look ? [{ action: "buy", title: "Looks good" }, { action: "skip", title: "Skip" }] : [];
+  // The number on the app icon: everything that needs you, even while the app is closed.
+  if (typeof msg.badge === "number" && self.navigator.setAppBadge) {
+    (msg.badge > 0 ? self.navigator.setAppBadge(msg.badge) : self.navigator.clearAppBadge()).catch(() => {});
+  }
   event.waitUntil(self.registration.showNotification(msg.title || "PayPal Pocket", {
     body: msg.body || "",
     icon: "/apple-touch-icon.png",

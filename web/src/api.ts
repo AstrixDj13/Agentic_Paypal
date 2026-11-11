@@ -5,7 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export type Attributes = Record<string, string>;
 
 export type AskMode = "anything" | "money";
-export type AgentKind = "hunt" | "routine" | "now";
+export type AgentKind = "hunt" | "routine" | "now" | "recurring";
+import type { BillsView } from "./components/bills";
 export interface ListItem { id: string; group: string; name: string; size: string; productId: string; qty: number; usualPrice: number }
 
 /** A pocket is an agent: its own money, name, colour and one job. */
@@ -34,6 +35,10 @@ export interface Proposal {
 export interface ChatMessage {
   id: string; agentId: string; from: "user" | "agent" | "system"; text: string; at: string;
   needsYou?: boolean; proposalId?: string; purchaseId?: string; orderId?: string;
+  /** Subscriptions and bills: the alert this message is about. */
+  alertId?: string;
+  /** The agent's first greeting; the app shows its own intro card instead. */
+  intro?: boolean;
 }
 export interface ActiveException { agentId: string; baseMandateId: string; tempMandateId: string; scope: "once" | "until"; until?: string; proposalId: string }
 
@@ -114,6 +119,8 @@ export interface AppState {
   channel3: { enabled: boolean };
   chats: ChatMessage[]; proposals: Proposal[]; exceptions: ActiveException[];
   orders?: Order[];
+  /** Subscriptions and bills (simulated merchants): pockets, alerts, what's coming up. */
+  bills?: BillsView;
 }
 
 export interface LedgerEntry { seq: number; ts: string; purchaseId: string; kind: string; payload: any; prevHash: string; hash: string }

@@ -21,6 +21,7 @@ import { AccountScreen } from "../components/account";
 import { AccountButton, AccountSheet } from "../components/accountSheet";
 import { AgentsStatus, PauseSheet, PausedBanner, type SetKill } from "../components/pause";
 import type { Signature } from "../components/lock";
+import { BillAlertCard, BillsSheet, DiscoveryCard, NextSevenDays, ProofSheet, isRecurring, pendingBillAlerts, subLine } from "../components/bills";
 
 const UNLOCK_KEY = "pocket.unlocked";
 const readUnlocked = () => { try { return sessionStorage.getItem(UNLOCK_KEY) === "1"; } catch { return false; } };
@@ -43,6 +44,8 @@ export type SheetState =
   | { kind: "pause" }
   | { kind: "updates" }
   | { kind: "found"; id: string; result: FindResult }
+  | { kind: "bills" }
+  | { kind: "proof"; id: string }
   | null;
 
 const TABS: { tab: Tab; path: string; label: string; icon: IconName }[] = [
@@ -337,7 +340,7 @@ export default function PocketApp() {
 
         {state && sheet && (
           <Sheet onClose={close} key={sheet.kind + ("id" in sheet ? sheet.id : "")}>
-            {sheet.kind === "agent" && <NewAgent state={state} act={act} close={close} open={openAgent} prefill={sheet.prefill} />}
+            {sheet.kind === "agent" && <NewAgent state={state} act={act} close={close} open={openAgent} prefill={sheet.prefill} openBills={() => setSheet({ kind: "bills" })} />}
             {sheet.kind === "want" && <WantSheet result={sheet.result} photo={sheet.photo} onMake={makeAgent} />}
             {sheet.kind === "job" && <JobSheet state={state} agentId={sheet.id} act={act} close={close} />}
             {sheet.kind === "move" && <MoveMoney state={state} agentId={sheet.id} act={act} close={close} />}
@@ -353,6 +356,8 @@ export default function PocketApp() {
               go={(w) => { if ("purchase" in w) setSheet({ kind: "purchase", id: w.purchase }); else { close(); if ("agent" in w) openAgent(w.agent); else navigate(w.path); } }} />}
             {sheet.kind === "pause" && <PauseSheet state={state} setKill={setKill} close={close} />}
             {sheet.kind === "account" && <AccountSheet state={state} email={account.mode === "accounts" ? account.email : null} signedIn={account.mode === "accounts" && !!account.email} act={act} go={(path) => { close(); navigate(path); }} show={show} />}
+            {sheet.kind === "bills" && <BillsSheet act={act} close={close} openAgent={openAgent} />}
+            {sheet.kind === "proof" && <ProofSheet id={sheet.id} />}
             {sheet.kind === "found" && <FoundSheet state={state} result={sheet.result} setSheet={setSheet} />}
           </Sheet>
         )}
@@ -391,7 +396,8 @@ function Home({ state, act, setSheet, setKill, goActivity, openAgent, goAgents, 
     .filter((p) => (p.status === "completed" || p.status === "disputed" || p.status === "escalated") && Date.parse(p.createdAt) >= monthStart.getTime())
     .reduce((s, p) => s + p.total, 0);
   // Trust tiles: proof the rules work, and proof you're covered.
-  const stopped = state.purchases.filter((p) => p.status === "blocked").length;
+  // Charges your caps stopped count too (a subscription price hike, a bill over its limit).
+  const stopped = state.purchases.filter((p) => p.status === "blocked").length + (state.bills?.alerts ?? []).filter((a) => a.type === "price_hike" || (a.type === "unusual" && a.cap !== undefined && (a.asked ?? 0) > a.cap)).length;
   const budgetAll = spentMonth + total;
   const hasWeekly = state.mandates.some((m) => m.mandate.kind === "routine" && open.some((a) => a.id === m.mandate.pocketId));
   const moneyBack = state.purchases.reduce((s, p) => {
@@ -451,6 +457,11 @@ function Home({ state, act, setSheet, setKill, goActivity, openAgent, goAgents, 
           <Icon name="chevronRight" size={18} className="muted" />
         </button>
       )}
+      {pendingBillAlerts(state).map((a) => (
+        <BillAlertCard key={a.id} state={state} a={a} act={act} openProof={(id) => setSheet({ kind: "proof", id })} openAgent={openAgent} />
+      ))}
+      <NextSevenDays state={state} act={act} openAgent={openAgent} />
+      {state.vault && <DiscoveryCard state={state} openBills={() => setSheet({ kind: "bills" })} />}
       {looks.map((p) => (
         <LookCard key={p.id} state={state} p={p} answer={(d) => act(() => api(`/api/purchases/${p.id}/look`, { decision: d }), d === "buy" ? "Buying it now." : "Skipped. Nothing was paid.")} />
       ))}
@@ -540,7 +551,8 @@ function AgentsTab({ state, setSheet, openAgent, show, refresh, back, setKill }:
   const [q, setQ] = useState("");
   const [showClosed, setShowClosed] = useState(false);
   // Needs you first, then active, then paused.
-  const rank = (p: typeof open[number]) => (pendingFor(state, p.id) > 0 ? 0 : p.paused ? 2 : 1);
+  // Subscriptions & bills first (the everyday money), then shopping. Inside each: needs you, active, paused.
+  const rank = (p: typeof open[number]) => (isRecurring(state, p) ? 0 : 10) + (pendingFor(state, p.id) > 0 || pendingBillAlerts(state).some((a) => a.agentId === p.id) ? 0 : p.paused ? 2 : 1);
   const shown = open
     .filter((p) => !q.trim() || `${p.name} ${activeMandate(state, p.id)?.mandate.item ?? ""}`.toLowerCase().includes(q.trim().toLowerCase()))
     .sort((a, b) => rank(a) - rank(b));
@@ -591,7 +603,10 @@ function AgentsTab({ state, setSheet, openAgent, show, refresh, back, setKill }:
         // A wallet: gradient cards, overlapping like Apple Wallet when there are several. Tap a card to open it.
         <div ref={stackRef} className={`wallet-stack ${shown.length > 2 ? "overlap" : ""}`}>
           {shown.length === 0 && <p className="subhead muted">No agents match “{q}”.</p>}
-          {shown.map((p) => {
+          {shown.map((p, i) => {
+            const rec = isRecurring(state, p);
+            const head = rec !== (i > 0 && isRecurring(state, shown[i - 1])) || i === 0
+              ? <h2 key={`h-${p.id}`} className="wallet-section">{rec ? "Subscriptions & bills" : "Shopping"}</h2> : null;
             const m = activeMandate(state, p.id)?.mandate;
             const b = budgetOf(state, p);
             const unread = unreadFor(state, p);
@@ -599,12 +614,12 @@ function AgentsTab({ state, setSheet, openAgent, show, refresh, back, setKill }:
             const off = state.killSwitch || p.paused;
             const ended = m && Date.parse(m.expiresAt) < Date.now();
             const status = waiting ? "Needs you" : off ? "Paused" : ended ? "Job ended" : unread ? `${unread} new` : undefined;
-            return (
+            return [head, (
               <button key={p.id} className="agent-card wallet-item agent-row-main" data-agent={p.id} data-flight onClick={(e) => lift(p.id, e.currentTarget)}
                 aria-label={`${p.name}, ${money(b.left)} left of ${money(b.total)}${status ? `, ${status}` : ""}`}>
-                <AgentCardFace agent={p} item={m?.item} left={b.left} total={b.total} status={status} {...cardStats(state, p.id)} />
+                <AgentCardFace agent={p} item={rec ? subLine(state, p.id) : m?.item} left={b.left} total={b.total} status={status} {...cardStats(state, p.id)} />
               </button>
-            );
+            )];
           })}
         </div>
       )}

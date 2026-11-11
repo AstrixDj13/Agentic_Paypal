@@ -16,6 +16,7 @@ import * as store from "../store/catalog.ts";
 import { buildWeeklyOrder, listFromInput } from "../grocery/routine.ts";
 import { findNow } from "../grocery/now.ts";
 import type { AgentKind } from "../core/types.ts";
+import { brandList, niceDate } from "../core/format.ts";
 
 /**
  * Agents: each pocket is a helper with a name, a colour, its own money and one signed job.
@@ -161,7 +162,10 @@ export function createAgent(input: NewAgent) {
     const signed = svc.signNewMandate(agent.id, input.instruction, input.draft);
     const m = signed.mandate;
     const ask = agent.askMode === "anything" ? "I'll ask you before every purchase." : "I'll buy on my own inside these rules and only ask you about money.";
-    postMessage(agent.id, "agent", `Hi, I'm ${agent.name}. My one job: ${m.item}, up to ${money(m.maxUnitPrice)} each, with ${money(agent.balance)} to spend. ${ask} If anything is out of bounds I stop and tell you here.`);
+    const job = m.kind === "routine" ? `I do your weekly shop: ${m.list?.length ?? 0} items, up to ${money(m.maxUnitPrice)} a week`
+      : m.kind === "now" ? `I find ${m.item} under ${money(m.maxUnitPrice)} with delivery${m.withinMinutes ? `, within ${m.withinMinutes} minutes` : ""}`
+      : `My one job: ${m.item}${m.allowed.brand?.length ? ` (${brandList(m.allowed.brand)})` : ""}, up to ${money(m.maxUnitPrice)} each, until ${niceDate(m.expiresAt)}`;
+    postMessage(agent.id, "agent", `Hi, I'm ${agent.name}. ${job}, with ${money(agent.balance)} to spend. ${ask} If anything is out of bounds I stop and tell you here.`, { intro: true });
     saveState();
     return { agent, mandate: signed };
   } catch (e) {
@@ -401,6 +405,7 @@ export async function checkNow(agentId: string, baseUrl: string) {
   if (!signed) throw new UserError("Give this agent a job first.");
   if (signed.mandate.kind === "routine") return { order: buildWeeklyOrder(agentId) };
   if (signed.mandate.kind === "now") return { order: findNow(agentId) };
+  if (signed.mandate.kind === "recurring") throw new UserError("Subscription and bill pockets pay when the merchant charges. Use \"Next month (demo)\" to simulate it.");
   return svc.runAgent(signed.mandate.id, { mode: "careful", baseUrl });
 }
 

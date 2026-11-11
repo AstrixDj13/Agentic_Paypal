@@ -24,7 +24,8 @@ export type GuardRule =
   | "quantity_over_limit"
   | "insufficient_pocket_balance"
   | "currency"
-  | "daily_limit";
+  | "daily_limit"
+  | "unusual_amount";
 
 export interface Violation {
   rule: GuardRule;
@@ -80,13 +81,15 @@ export function checkOrder(
   if (order.unitPrice > m.maxUnitPrice) v.push({ rule: "price_over_limit", detail: `Unit price $${order.unitPrice} exceeds limit $${m.maxUnitPrice}.` });
   if (order.quantity < 1 || order.quantity > m.maxQuantity) v.push({ rule: "quantity_over_limit", detail: `Quantity ${order.quantity} outside 1..${m.maxQuantity}.` });
   if (total > pocket.balance) v.push({ rule: "insufficient_pocket_balance", detail: `Total $${total} exceeds pocket "${pocket.name}" balance $${pocket.balance}.` });
-  if (state.purchasesToday >= state.maxPurchasesPerDay) v.push({ rule: "daily_limit", detail: `Daily limit of ${state.maxPurchasesPerDay} purchases reached.` });
+  // A monthly bill is not an agent "purchase": it doesn't use up the daily purchase limit.
+  if (m.kind !== "recurring" && state.purchasesToday >= state.maxPurchasesPerDay) v.push({ rule: "daily_limit", detail: `Daily limit of ${state.maxPurchasesPerDay} purchases reached.` });
 
   if (v.length > 0) return { outcome: "block", violations: v, total };
 
   // Soft rules: everything is inside the rules, but the user wants a tap first.
   const soft: Violation[] = [];
   if (!state.knownMerchants.includes(order.merchantId)) soft.push({ rule: "new_merchant_needs_approval", detail: `First purchase from "${order.merchantId}".` });
+  if (m.askAbove !== undefined && order.unitPrice > m.askAbove) soft.push({ rule: "unusual_amount", detail: `$${order.unitPrice} is more than usual (you said ask me above $${m.askAbove}).` });
   if (state.askEveryPurchase) soft.push({ rule: "ask_every_purchase", detail: `${pocket.name} is set to ask you before every purchase.` });
   if (soft.length) return { outcome: "ask_user", violations: soft, total };
   return { outcome: "allow", violations: [], total };

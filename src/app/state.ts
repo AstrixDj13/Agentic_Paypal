@@ -160,6 +160,10 @@ export interface ChatMessage {
   proposalId?: string;
   purchaseId?: string;
   orderId?: string;
+  /** Subscriptions and bills: the alert this message is about (price hike, trial, duplicate, unusual bill). */
+  alertId?: string;
+  /** The agent's first "Hi, I'm…" message. The app shows its own intro card instead, so it hides these. */
+  intro?: boolean;
 }
 
 /** A one-time or temporary rule change in force. The base mandate comes back when it ends. */

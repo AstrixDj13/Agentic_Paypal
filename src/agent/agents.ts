@@ -11,6 +11,7 @@ import { MERCHANT_ID, type Product } from "../store/catalog.ts";
 export type MandateDraft = Pick<Mandate, "item" | "required" | "allowed" | "maxUnitPrice" | "maxQuantity" | "expiresAt"> & {
   avoid?: string[]; description?: string; refImage?: string;
   kind?: Mandate["kind"]; list?: Mandate["list"]; withinMinutes?: number; merchants?: string[];
+  askAbove?: number; cadence?: Mandate["cadence"];
 };
 
 const KNOWN_BRANDS = ["nike", "adidas", "puma", "asics", "new balance", "hoka", "brooks", "reebok", "on"];
@@ -19,7 +20,7 @@ export async function parseInstruction(instruction: string, now = new Date()): P
   const ai = await askJson<MandateDraft>(
     `You convert a shopper's plain-English instruction into strict purchase rules for an AI shopping agent.
 Today is ${now.toISOString().slice(0, 10)}. Output JSON with keys:
-item (short noun phrase), required (object of exact attribute values; use size_us for US shoe size),
+item (short noun phrase), required (object of exact attribute values; use size_us for a US shoe size and size for a clothing letter size such as "M"),
 allowed (object mapping attribute -> array of allowed lowercase values, e.g. {"brand":["nike","adidas"]}),
 maxUnitPrice (number, USD), maxQuantity (integer, default 1), expiresAt (ISO 8601 end of day UTC; default 30 days from today),
 avoid (array of lowercase words the user excluded, e.g. "not paprika" -> ["paprika"]; empty if none),
@@ -49,13 +50,15 @@ export function sanitizeDraft(ai: any, now: Date = new Date()): MandateDraft | n
   const avoid = (Array.isArray(ai.avoid) ? ai.avoid : ai.avoid ? [ai.avoid] : []).map((x: unknown) => String(x).trim().toLowerCase()).filter(Boolean).slice(0, 10);
   const description = typeof ai.description === "string" ? ai.description.trim().slice(0, 400) : "";
   const within = Math.round(Number(ai.withinMinutes));
-  const kind = ai.kind === "now" || ai.kind === "routine" ? ai.kind : within > 0 ? "now" : undefined;
+  const kind = ai.kind === "now" || ai.kind === "routine" || ai.kind === "recurring" ? ai.kind : within > 0 ? "now" : undefined;
+  const askAbove = Number(ai.askAbove);
   return {
     item: String(ai.item),
     avoid,
     ...(description ? { description } : {}),
     ...(within > 0 && within <= 240 ? { withinMinutes: within } : {}),
     ...(kind ? { kind } : {}),
+    ...(kind === "recurring" ? { cadence: "monthly" as const, ...(askAbove > 0 ? { askAbove: Math.round(askAbove * 100) / 100 } : {}) } : {}),
     ...(Array.isArray(ai.list) && ai.list.length ? { list: ai.list } : {}),
     ...(Array.isArray(ai.merchants) ? { merchants: ai.merchants.map(String).slice(0, 20) } : {}),
     ...(typeof ai.refImage === "string" && /^[a-f0-9]{32}$/.test(ai.refImage) ? { refImage: ai.refImage } : {}),
@@ -71,6 +74,8 @@ export function sanitizeDraft(ai: any, now: Date = new Date()): MandateDraft | n
 export function parseWithRules(text: string, now = new Date()): MandateDraft {
   const t = text.toLowerCase();
   const size = t.match(/size\s*(?:us\s*)?(\d+(?:\.\d)?)/)?.[1];
+  const LETTER: Record<string, string> = { xxs: "XXS", xs: "XS", s: "S", small: "S", m: "M", medium: "M", l: "L", large: "L", xl: "XL", xxl: "XXL" };
+  const letter = LETTER[t.match(/\bsize\s+(xxs|xs|small|medium|large|xxl|xl|s|m|l)\b/)?.[1] ?? ""];
   const price =
     t.match(/(?:under|below|max(?:imum)?|up to|<)\s*\$?\s*(\d+(?:\.\d+)?)/)?.[1] ??
     t.match(/\$\s*(\d+(?:\.\d+)?)/)?.[1] ??
@@ -84,7 +89,7 @@ export function parseWithRules(text: string, now = new Date()): MandateDraft {
     item,
     avoid,
     ...(within ? { withinMinutes: within, kind: "now" as const } : {}),
-    required: size ? { size_us: size } : {},
+    required: { ...(size ? { size_us: size } : {}), ...(letter ? { size: letter } : {}) },
     allowed: brands.length ? { brand: brands } : {},
     maxUnitPrice: price ? Number(price) : 100,
     maxQuantity: qty ? Number(qty) : 1,
@@ -194,6 +199,14 @@ function naiveRead(m: Mandate, p: Product): ProposedOrder | null {
   const injQty = p.hiddenText?.match(/quantity\s+(\d+)/i)?.[1];
   const injPrice = p.hiddenText?.match(/\$(\d+(?:\.\d+)?)/)?.[1];
   return baseOrder(m, p, attrs, injPrice ? Number(injPrice) : p.unitPrice, injQty ? Number(injQty) : 1);
+}
+
+/**
+ * When the user sends the careful agent to one specific listing that breaks a rule, the agent
+ * claims exactly what the listing says (no spin), so the guard can stop it and say why.
+ */
+export function listingClaim(m: Mandate, p: Product): ProposedOrder {
+  return { ...baseOrder(m, p, { ...p.attributes }, p.unitPrice, 1), reasoning: "You sent me to this listing. This is exactly what it says." };
 }
 
 function baseOrder(m: Mandate, p: Product, attributes: Attributes, unitPrice: number, quantity: number): ProposedOrder {

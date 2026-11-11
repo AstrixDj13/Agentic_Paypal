@@ -124,7 +124,7 @@ const focusAfterSheet = (el: HTMLInputElement | null) => {
 };
 
 /** 1 money → 2 job in your words → 3 check the rules, name (suggested from the job), when it asks, approve. */
-export function NewAgent({ state, act, close, open, prefill }: { state: AppState; act: Act; close: () => void; open: (id: string) => void; prefill?: AgentPrefill }) {
+export function NewAgent({ state, act, close, open, prefill, openBills }: { state: AppState; act: Act; close: () => void; open: (id: string) => void; prefill?: AgentPrefill; openBills?: () => void }) {
   const [step, setStep] = useState(1);
   const [name, setName] = useState<string | null>(null); // null = use the suggestion
   const color = AGENT_COLORS[0]; // stored for older clients; the UI doesn't colour-code agents
@@ -184,6 +184,17 @@ export function NewAgent({ state, act, close, open, prefill }: { state: AppState
             {[50, 100, 150, 300].map((v) => <button key={v} className={`chip btnlike ${Number(amount) === v ? "on" : ""}`} onClick={() => setAmount(String(v))}>${v}</button>)}
           </div>
           <button className="btn primary block" disabled={!(Number(amount) > 0)} onClick={() => setStep(2)}>Next</button>
+          {/* The fourth kind: a subscription or bill gets its own pocket with a cap (its own short flow). */}
+          {openBills && !prefill && (
+            <button className="card action-row new-bill-row" onClick={openBills}>
+              <Icon name="clock" size={20} />
+              <span className="grow stack-xs">
+                <strong className="headline">Subscription or bill</strong>
+                <span className="footnote muted">Netflix, electricity, the gym… a cap per merchant, and it asks before anything unusual.</span>
+              </span>
+              <Icon name="chevronRight" size={18} className="muted" />
+            </button>
+          )}
         </div>
       )}
 

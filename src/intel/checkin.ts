@@ -1,4 +1,5 @@
-import { loadState } from "../app/state.ts";
+import { pendingAlerts } from "../bills/pending.ts";
+import { loadState, saveState } from "../app/state.ts";
 import { lastCheckin, markCheckin, notify } from "./push.ts";
 import { orderSummary, pendingAsks } from "../grocery/routine.ts";
 
@@ -8,9 +9,22 @@ import { orderSummary, pendingAsks } from "../grocery/routine.ts";
  * Urgent asks (a take-a-look the user turned on, a stock-out blocking an order) still push at once.
  */
 
-/** Saturday, 9:00 (server's local time). */
+/** Default: Saturday, 9:00 (server's local time). Each user can choose their own day and time. */
 export const CHECKIN_DAY = 6;
 export const CHECKIN_HOUR = 9;
+
+type WithCheckin = ReturnType<typeof loadState> & { checkinAt?: { day: number; hour: number } };
+export function checkinSchedule() {
+  const c = (loadState() as WithCheckin).checkinAt;
+  return { day: c?.day ?? CHECKIN_DAY, hour: c?.hour ?? CHECKIN_HOUR };
+}
+export function setCheckinSchedule(day: unknown, hour: unknown) {
+  const d = Math.round(Number(day)), h = Math.round(Number(hour));
+  if (!(d >= 0 && d <= 6) || !(h >= 0 && h <= 23)) throw new Error("Pick a day (0 = Sunday … 6 = Saturday) and an hour (0–23).");
+  (loadState() as WithCheckin).checkinAt = { day: d, hour: h };
+  saveState();
+  return { ...checkinSchedule(), nextAt: nextCheckinAt().toISOString() };
+}
 
 export interface Checkin {
   title: string;
@@ -20,14 +34,15 @@ export interface Checkin {
   week: { purchases: number; spent: number; stopped: number; moneyBack: number };
   lastSentAt?: string;
   nextAt: string;
+  schedule?: { day: number; hour: number };
 }
 
 const money = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
 
-export function nextCheckinAt(now = new Date()): Date {
+export function nextCheckinAt(now = new Date(), when: { day: number; hour: number } = safeSchedule()): Date {
   const d = new Date(now);
-  d.setHours(CHECKIN_HOUR, 0, 0, 0);
-  d.setDate(d.getDate() + ((CHECKIN_DAY - d.getDay() + 7) % 7));
+  d.setHours(when.hour, 0, 0, 0);
+  d.setDate(d.getDate() + ((when.day - d.getDay() + 7) % 7));
   if (d <= now) d.setDate(d.getDate() + 7);
   return d;
 }
@@ -49,6 +64,7 @@ export function buildCheckin(now = new Date()): Checkin {
     const asks = pendingAsks(o).length;
     if (asks || o.status === "needs_approval") waiting.push({ agentId: o.agentId, agent: name(o.agentId), what: asks ? `${asks} swap${asks === 1 ? "" : "s"} on this week's order` : "approve this week's order" });
   }
+  for (const a of pendingAlerts(s)) waiting.push({ agentId: a.agentId, agent: name(a.agentId), what: a.type === "price_hike" ? `a new price, ${money(a.asked ?? 0)}` : a.type === "unusual" ? `a ${money(a.asked ?? 0)} bill` : a.type === "trial_end" ? "a trial ending" : "paying twice" });
   const since = now.getTime() - 7 * 864e5;
   const thisWeek = s.purchases.filter((p) => Date.parse(p.createdAt) >= since);
   const paid = thisWeek.filter((p) => p.paypal);
@@ -80,6 +96,7 @@ export function buildCheckin(now = new Date()): Checkin {
     week,
     lastSentAt: lastCheckin(),
     nextAt: nextCheckinAt(now).toISOString(),
+    schedule: checkinSchedule(),
   };
 }
 
@@ -92,8 +109,14 @@ export async function sendCheckin(): Promise<{ sent: number; checkin: Checkin }>
 
 /** Called every few minutes: sends the check-in once, on Saturday after 9:00, if it hasn't gone out this week. */
 export async function maybeWeeklyCheckin(now = new Date()) {
-  if (now.getDay() !== CHECKIN_DAY || now.getHours() < CHECKIN_HOUR) return;
+  const when = checkinSchedule();
+  if (now.getDay() !== when.day || now.getHours() < when.hour) return;
   const last = lastCheckin();
   if (last && now.getTime() - Date.parse(last) < 6 * 864e5) return;
   await sendCheckin();
+}
+
+/** The user's schedule, or the default when there's no signed-in user (e.g. unit tests). */
+function safeSchedule() {
+  try { return checkinSchedule(); } catch { return { day: CHECKIN_DAY, hour: CHECKIN_HOUR }; }
 }

@@ -30,6 +30,10 @@ export interface Mandate {
   list?: ListItem[];
   /** Right-now agents: it must arrive within this many minutes. */
   withinMinutes?: number;
+  /** Subscription / bill pockets: amounts above this are inside the cap but unusual, so the agent asks first. */
+  askAbove?: number;
+  /** Subscription / bill pockets: how often the merchant charges. */
+  cadence?: "monthly";
   /** Merchant ids the agent may buy from. Empty = any agent-ready merchant. */
   merchants: string[];
   expiresAt: string; // ISO
@@ -57,7 +61,7 @@ export interface SignedMandate {
   signature: string;
 }
 
-export type AgentKind = "hunt" | "routine" | "now";
+export type AgentKind = "hunt" | "routine" | "now" | "recurring";
 
 /** One line of a weekly list: the usual product, how many, and what the user usually pays for it. */
 export interface ListItem {

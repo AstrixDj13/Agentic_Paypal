@@ -105,6 +105,8 @@ export function signNewMandate(pocketId: string, instruction: string, rawDraft: 
     ...(draft.kind && draft.kind !== "hunt" ? { kind: draft.kind } : {}),
     ...(draft.list?.length ? { list: draft.list } : {}),
     ...(draft.withinMinutes ? { withinMinutes: draft.withinMinutes } : {}),
+    ...(draft.cadence ? { cadence: draft.cadence } : {}),
+    ...(draft.askAbove ? { askAbove: draft.askAbove } : {}),
     // Routine and right-now jobs buy from their own (simulated) stores; hunts buy at Stride Supply.
     merchants: draft.merchants ?? (draft.kind === "routine" ? ["grocery"] : draft.kind === "now" ? [] : [store.MERCHANT_ID]),
     expiresAt: draft.expiresAt,
@@ -156,6 +158,11 @@ export async function runAgent(mandateId: string, opts: { mode?: agents.AgentMod
   const ids = opts.productIds ?? (opts.productId ? [opts.productId] : null);
   const candidates = ids ? ids.map((id) => store.getProduct(id)).filter((p): p is store.Product => !!p) : store.listProducts();
   const choice = await agents.chooseProduct(signed.mandate, candidates, mode);
+  // Sent to one listing that breaks a rule (not just the price): let the guard check it and record why.
+  if (!choice.order && !choice.nearMiss && mode === "careful" && ids?.length === 1) {
+    const only = candidates[0];
+    if (only?.inStock && agents.matchesJob(signed.mandate, only)) choice.order = agents.listingClaim(signed.mandate, only);
+  }
   if (!choice.order) {
     const m = signed.mandate;
     if (choice.nearMiss) {
@@ -204,7 +211,7 @@ export async function runAgent(mandateId: string, opts: { mode?: agents.AgentMod
     purchase.status = "store_suggested";
     purchase.storeOffer = near;
     recorder.append(purchase.id, "in_store", { suggested: true, ...near, saving: Math.round((near.onlinePrice - near.price) * 100) / 100 });
-    postMessage(pocket.id, "agent", `The same ${product.title} is $${near.price} at ${near.shop}, ${near.distanceKm} km away, versus $${near.onlinePrice} online. That's $${(near.onlinePrice - near.price).toFixed(2)} less if you pick it up. I haven't paid for anything.`, { purchaseId: purchase.id, needsYou: true });
+    postMessage(pocket.id, "agent", "It's cheaper in a shop nearby. I haven't paid for anything.", { purchaseId: purchase.id, needsYou: true });
     saveState();
     return { purchase };
   }
@@ -215,7 +222,7 @@ export async function runAgent(mandateId: string, opts: { mode?: agents.AgentMod
     purchase.status = "awaiting_look";
     purchase.lookUntil = new Date(Date.now() + look * 1000).toISOString();
     const mins = look >= 60 ? `${Math.round(look / 60)} min` : `${look} s`;
-    postMessage(pocket.id, "agent", `Found ${product.title} for $${purchase.total}. It fits your rules. Take a look: I'll buy it in ${mins} unless you skip it.`, { purchaseId: purchase.id, needsYou: true }); // its own push (with photo and buttons) follows
+    postMessage(pocket.id, "agent", `Take a look before I buy. I'll go ahead in ${mins} unless you skip it.`, { purchaseId: purchase.id, needsYou: true }); // its own push (with photo and buttons) follows
     void notify({
       title: `${pocket.name}: take a look before I buy`,
       body: `${product.title} · $${purchase.total}. Buying in ${mins} unless you skip.`,

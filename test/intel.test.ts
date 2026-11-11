@@ -30,12 +30,15 @@ test("describeMatch: share of described details the listing mentions", () => {
 test("weekly check-in is scheduled for the next Saturday at 9:00 (local)", async () => {
   const { nextCheckinAt } = await import("../src/intel/checkin.ts");
   const wed = new Date(2026, 10, 11, 15, 0);            // Wednesday Nov 11, 3pm
-  const n = nextCheckinAt(wed);
+  const n = nextCheckinAt(wed, { day: 6, hour: 9 });
   assert.equal(n.getDay(), 6);
   assert.equal(n.getHours(), 9);
   assert.equal(n.getDate(), 14);
   const satLate = new Date(2026, 10, 14, 10, 0);        // Saturday after 9:00 -> next week
-  assert.equal(nextCheckinAt(satLate).getDate(), 21);
+  assert.equal(nextCheckinAt(satLate, { day: 6, hour: 9 }).getDate(), 21);
   const satEarly = new Date(2026, 10, 14, 8, 0);        // Saturday before 9:00 -> today
-  assert.equal(nextCheckinAt(satEarly).getDate(), 14);
+  assert.equal(nextCheckinAt(satEarly, { day: 6, hour: 9 }).getDate(), 14);
+  const mon = nextCheckinAt(wed, { day: 1, hour: 18 });
+  assert.equal(mon.getDay(), 1);
+  assert.equal(mon.getHours(), 18);
 });
