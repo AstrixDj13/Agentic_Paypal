@@ -3,7 +3,8 @@ import { api, money, when, type AppState, type LedgerEntry, type Pocket } from "
 import { Icon } from "./Icon";
 import { SignButton } from "./lock";
 import { amount } from "./agent";
-import { BrandTile, brandOf, type BrandId } from "./brands";
+import { BrandTile, brandOf } from "./brands";
+import { launch, reducedMotion } from "../motion";
 import type { Act } from "./purchase";
 
 /**
@@ -352,41 +353,59 @@ export function SubPanel({ state, agent, act }: { state: AppState; agent: Pocket
   );
 }
 
-/* ------------------------------------ The bundle card (Agents wallet) ------------------------------------ */
+/* ------------------------------------ Home: the subscriptions row ------------------------------------ */
+
+/** "today", "tomorrow", "Sat", then "26 Nov". */
+const rel = (iso: string) => {
+  const d = Math.max(0, Math.ceil((Date.parse(iso) - Date.now()) / 86_400_000));
+  return d === 0 ? "Today" : d === 1 ? "Tomorrow" : d <= 6 ? day(iso) : short(iso);
+};
 
 /**
- * All subscriptions and bills as ONE card in the Agents wallet: they're passive money, so they shouldn't push your
- * shopping agents off the screen. The top strip (all you see when cards overlap) carries everything that matters:
- * the merchants at a glance, the monthly total, what's next, and whether something needs you.
- * Tapping it lifts it like any card and opens the subscriptions wallet, where the merchant cards unfold out of it.
+ * Subscriptions on Home: a sideways row of small merchant cards, one tap from opening the app.
+ * Whatever needs you comes first, then whatever charges soonest. Tap a card and it flies into its page;
+ * "See all" opens the Subscriptions wallet. (Replaces the "Next 7 days" block: same facts, on the cards.)
  */
-export function BundleFace({ state, ids }: { state: AppState; ids: string[] }) {
-  const b = state.bills;
-  const pockets = ids.map((id) => state.pockets.find((p) => p.id === id)).filter(Boolean) as Pocket[];
-  const marks = pockets.map((p) => brandOf(p)).filter(Boolean) as BrandId[];
-  const needs = pendingBillAlerts(state).filter((a) => ids.includes(a.agentId)).length;
-  const next = [...(b?.upcoming ?? [])].filter((u) => ids.includes(u.agentId)).sort((x, y) => x.inDays - y.inDays)[0];
-  const when = next ? (next.inDays === 0 ? "today" : next.inDays === 1 ? "tomorrow" : next.inDays <= 6 ? day(next.at) : short(next.at)) : "";
-  const line = needs ? `${needs} need${needs === 1 ? "s" : ""} you` : next ? `Next: ${next.name}, ${when}` : `${ids.length} payments`;
+export function SubsRow({ state, openAgent, seeAll }: { state: AppState; openAgent: (id: string) => void; seeAll: () => void }) {
+  const open = new Map(state.pockets.filter((p) => !p.closedAt).map((p) => [p.id, p]));
+  const subs = (state.bills?.subs ?? []).filter((x) => x.status !== "cancelled" && open.has(x.agentId));
+  if (!subs.length) return null;
+  const alerts = pendingBillAlerts(state);
+  const needs = (id: string) => alerts.some((a) => a.agentId === id);
+  const at = (x: Sub) => (x.status === "trial" ? x.trialEndsAt! : x.nextChargeAt);
+  const sorted = [...subs].sort((x, y) => Number(needs(y.agentId)) - Number(needs(x.agentId)) || Date.parse(at(x)) - Date.parse(at(y)));
+  const go = (id: string, el: HTMLElement) => { if (!reducedMotion()) launch(id, el.getBoundingClientRect()); openAgent(id); };
   return (
-    <span className="agent-face tone-bundle is-brand bundle-face">
-      <span className="face-top">
-        <span className="bundle-marks" aria-hidden="true">
-          {marks.slice(0, 3).map((m) => <BrandTile key={m} id={m} />)}
-        </span>
-        <span className="face-id">
-          <span className="face-name">Subscriptions</span>
-          <span className={`face-job ${needs ? "bundle-needs" : ""}`}>{line}</span>
-        </span>
-        <span className="face-money">
-          <span className="face-amount">{amount(Math.round((b?.monthly ?? 0) * 100) / 100)}</span>
-          <span className="face-cap">a month</span>
-        </span>
-      </span>
-      <span className="face-bottom">
-        <span className="bundle-strip" aria-hidden="true">{marks.map((m) => <BrandTile key={m} id={m} />)}</span>
-        {needs > 0 && <span className="face-status">Needs you</span>}
-      </span>
-    </span>
+    <section className="subs-row" aria-label="Subscriptions">
+      <div className="subs-head">
+        <h2 className="headline">Subscriptions</h2>
+        <span className="footnote muted grow">{amount(Math.round((state.bills?.monthly ?? 0) * 100) / 100)} a month</span>
+        <button className="link-btn" onClick={seeAll}>See all</button>
+      </div>
+      <div className="subs-scroll">
+        {sorted.map((x) => {
+          const p = open.get(x.agentId)!;
+          const brand = brandOf(p);
+          const f = subFace(state, x.agentId)!;
+          const n = needs(x.agentId);
+          const r = rel(at(x));
+          const when = x.status === "trial" ? `Trial ends ${/^To/.test(r) ? r.toLowerCase() : r}` : r;
+          return (
+            <button key={x.agentId} className={`mini-card agent-face tone-${brand ?? "bundle"}`} data-flight onClick={(e) => go(x.agentId, e.currentTarget)}
+              aria-label={`${x.name}, ${f.figure.amount} ${f.figure.cap}${n ? ", needs you" : `, next ${when}`}`}>
+              <span className="mini-top">
+                {brand ? <BrandTile id={brand} /> : <span />}
+                {n && <span className="mini-flag">Needs you</span>}
+              </span>
+              <span className="mini-text">
+                <span className="mini-name">{x.name}</span>
+                <span className="mini-price">{f.figure.amount}{x.status === "trial" ? "" : <small>/mo</small>}</span>
+                <span className="mini-when">{when}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }

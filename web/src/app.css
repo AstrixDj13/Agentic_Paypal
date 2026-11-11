@@ -1530,23 +1530,35 @@ html.app-locked, html.app-locked body { overflow: hidden; overscroll-behavior: n
 .sub-panel .sub-facts > span { padding: 8px 10px; min-width: 0; }
 .sub-panel .sub-facts .caption { white-space: nowrap; }
 
-/* ------------------------------ The subscriptions bundle card + a tighter wallet ------------------------------ */
-/* Graphite, like a premium card: the merchant tiles bring the colour. */
+/* ------------------------------ Subscriptions: Home row, Agents switch, a tighter wallet ------------------------------ */
+/* Graphite (Home's peeking stack uses it for "all your subscriptions"). */
 .tone-bundle { --face: radial-gradient(80% 75% at 100% 0%, #5a6170 0%, transparent 60%), radial-gradient(90% 80% at 0% 115%, #2a2f3a 0%, transparent 62%), linear-gradient(140deg, #2b2f38 0%, #17191f 100%); --face-edge: linear-gradient(175deg, #5a6170 0%, #2b2f38 50%, #17191f 100%); --face-solid: #2b2f38; }
-/* Three merchant tiles fanned where the emblem sits, so the top strip says "subscriptions" even when covered */
-.bundle-marks { flex: none; display: flex; align-items: center; height: 36px; padding-right: 2px; }
-.bundle-marks .brand-tile { width: 30px; height: 30px; border-radius: 8px; box-shadow: 0 0 0 2px #23262e, 0 1px 2px rgba(0, 0, 0, 0.35); }
-.bundle-marks .brand-tile.round { border-radius: 50%; }
-.bundle-marks .brand-tile + .brand-tile { margin-left: -12px; }
-.bundle-marks .brand-tile .brand-letter { font-size: 21px; }
-.bundle-face .face-name { font-size: var(--text-body); }
-.bundle-face .face-job.bundle-needs { color: #ffd27a; font-weight: 600; }
-/* The full set along the bottom, visible when the bundle card isn't covered */
-.bundle-strip { flex: 1; min-width: 0; display: flex; gap: 8px; overflow: hidden; }
-.bundle-strip .brand-tile { width: 32px; height: 32px; border-radius: 9px; }
-.bundle-strip .brand-tile.round { border-radius: 50%; }
-.bundle-strip .brand-tile .brand-letter { font-size: 22px; }
 .group-sum { margin: -4px 4px 2px; text-align: center; }
 
 /* Wallet density: each covered card shows just its top strip (name, line, amount), like passes in Wallet */
 .wallet-stack.overlap .wallet-item + .wallet-item { margin-top: -130px; }
+
+/* Agents: Shopping | Subscriptions */
+.agents-seg .segmented { width: 100%; }
+.agents-seg .segmented button { flex: 1; }
+
+/* Home: subscriptions as a sideways row of small merchant cards (one tap to any of them) */
+.subs-row { display: flex; flex-direction: column; gap: 10px; }
+.subs-head { display: flex; align-items: baseline; gap: 8px; padding: 0 4px; }
+.subs-head .headline { margin: 0; }
+.subs-scroll { display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding: 0 16px;
+  margin: 0 -16px; padding: 2px 16px 12px; scrollbar-width: none; overscroll-behavior-x: contain; }
+.subs-scroll::-webkit-scrollbar { display: none; }
+.mini-card.agent-face { flex: none; width: 148px; height: 132px; padding: 12px 14px 13px; border: 0; border-radius: 18px;
+  scroll-snap-align: start; cursor: pointer; font: inherit; text-align: left; gap: 6px; }
+.mini-card.agent-face:active { transform: scale(0.97); }
+.mini-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; }
+.mini-top .brand-tile { width: 30px; height: 30px; border-radius: 8px; }
+.mini-top .brand-tile.round { border-radius: 50%; }
+.mini-top .brand-tile .brand-letter { font-size: 21px; }
+.mini-flag { height: 22px; padding: 0 8px; border-radius: 11px; display: inline-flex; align-items: center; background: #ffd27a; color: #3a2400; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.mini-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.mini-name { font-size: var(--text-sm); font-weight: 600; color: rgba(255, 255, 255, 0.92); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); }
+.mini-price { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.15; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.22); }
+.mini-price small { font-size: 12px; font-weight: 600; opacity: 0.85; margin-left: 1px; }
+.mini-when { font-size: var(--text-xs); font-weight: 500; color: rgba(255, 255, 255, 0.85); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
