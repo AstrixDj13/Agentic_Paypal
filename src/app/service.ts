@@ -135,7 +135,8 @@ export function mandateOf(id: string): SignedMandate {
 export function guardState(pocket?: Pocket): GuardState {
   const s = loadState();
   const today = new Date().toISOString().slice(0, 10);
-  const purchasesToday = s.purchases.filter((p) => p.paypal && p.createdAt.startsWith(today)).length;
+  // Monthly bill payments are not agent purchases: they never use up the daily purchase limit.
+  const purchasesToday = s.purchases.filter((p) => p.paypal && p.createdAt.startsWith(today) && !p.productId.startsWith("bill:")).length;
   return { killSwitch: s.killSwitch, maxPurchasesPerDay: s.maxPurchasesPerDay, purchasesToday, knownMerchants: s.knownMerchants, askEveryPurchase: pocket?.askMode === "anything" };
 }
 
