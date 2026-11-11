@@ -24,10 +24,6 @@ import type { Signature } from "../components/lock";
 import { BillAlertCard, BillsSheet, DiscoveryCard, ProofSheet, SubsRow, isRecurring, pendingBillAlerts, subFace } from "../components/bills";
 
 const UNLOCK_KEY = "pocket.unlocked";
-/** Which Agents wallet you used last, so the tab reopens there. */
-const SEG_KEY = "pp-agents-seg";
-const readSeg = () => { try { return localStorage.getItem(SEG_KEY); } catch { return null; } };
-const rememberSeg = (v: "shopping" | "subs") => { try { localStorage.setItem(SEG_KEY, v); } catch { /* storage blocked */ } };
 const readUnlocked = () => { try { return sessionStorage.getItem(UNLOCK_KEY) === "1"; } catch { return false; } };
 
 type Tab = "home" | "agents" | "agent" | "activity" | "blackbox" | "knows" | "share";
@@ -169,8 +165,9 @@ export default function PocketApp() {
   const agentId = tab === "agent" ? decodeURIComponent(pathname.split("/")[2] ?? "") : "";
   const openAgent = (id: string, view?: "chat") => navigate(`/agents/${id}${view ? `?view=${view}` : ""}`);
   // Home → Agents: the Agents screen is pushed over Home (see AgentsLayer).
-  // It opens on the wallet you used last (Shopping or Subscriptions).
-  const goAgents = () => navigate(readSeg() === "subs" ? "/agents?g=subs" : "/agents", { state: { push: true } });
+  // One entry, one destination: the Agents tab and Home's peeking cards open Shopping; Home's Subscriptions row opens Subscriptions.
+  const goAgents = () => navigate("/agents", { state: { push: true } });
+  const goSubs = () => navigate("/agents?g=subs", { state: { push: true } });
   // Subscriptions & bills live in their own small wallet inside Agents (/agents?g=subs).
   const subsGroup = tab === "agents" && new URLSearchParams(search).get("g") === "subs";
   const mainRef = useRef<HTMLElement>(null);
@@ -311,7 +308,7 @@ export default function PocketApp() {
           ) : (
             <>
               {/* Home stays mounted under the Agents layer, so going back is instant and the slide can reveal it. */}
-              {(tab === "home" || tab === "agents") && <Home state={state} act={act} setSheet={setSheet} setKill={setKill} goActivity={(f) => navigate(f ? `/activity?f=${f}` : "/activity")} openAgent={(id) => navigate(`/agents/${id}`, { state: { from: "home" } })} goAgents={goAgents} goSubs={() => { rememberSeg("subs"); navigate("/agents?g=subs", { state: { push: true } }); }} goBlackBox={() => navigate("/console")} makeAgent={makeAgent} openKnows={() => navigate("/knows")} snap={snap.open} accountEmail={account.mode === "accounts" ? account.email : null} openAccount={() => setSheet({ kind: "account" })} updates={{ needs: needCount, unread, open: () => setSheet({ kind: "updates" }) }} />}
+              {(tab === "home" || tab === "agents") && <Home state={state} act={act} setSheet={setSheet} setKill={setKill} goActivity={(f) => navigate(f ? `/activity?f=${f}` : "/activity")} openAgent={(id) => navigate(`/agents/${id}`, { state: { from: "home" } })} goAgents={goAgents} goSubs={goSubs} goBlackBox={() => navigate("/console")} makeAgent={makeAgent} openKnows={() => navigate("/knows")} snap={snap.open} accountEmail={account.mode === "accounts" ? account.email : null} openAccount={() => setSheet({ kind: "account" })} updates={{ needs: needCount, unread, open: () => setSheet({ kind: "updates" }) }} />}
               {tab === "knows" && <KnowsPage back={() => navigate("/")} onUse={makeAgent} onSnap={snap.open} show={show} />}
               {tab === "share" && <SharePage onResult={onShared} show={show} done={shareDone} />}
               {tab === "agent" && <AgentPage state={state} agentId={agentId} act={act} refresh={refresh} show={show} setSheet={setSheet} back={() => navigate(fromHome ? "/" : subAgent ? "/agents?g=subs" : "/agents")} />}
@@ -408,7 +405,9 @@ function Home({ state, act, setSheet, setKill, goActivity, openAgent, goAgents, 
     .reduce((s, p) => s + p.total, 0);
   // The cards peeking in from the right mirror the Agents wallet: all subscriptions & bills are one card there.
   const shopping = open.filter((p) => !isRecurring(state, p));
-  const peek: (typeof open[number] | "subs")[] = shopping.length < open.length ? ["subs", ...shopping] : shopping;
+  // The peeking cards are your shopping agents and open Shopping (subscriptions have their own row below).
+  // With no shopping agents yet, they stand for your subscriptions and open those instead.
+  const peek: (typeof open[number] | "subs")[] = shopping.length ? shopping : open.length ? ["subs"] : [];
   // Trust tiles: proof the rules work, and proof you're covered.
   // Charges your caps stopped count too (a subscription price hike, a bill over its limit).
   const stopped = state.purchases.filter((p) => p.status === "blocked").length + (state.bills?.alerts ?? []).filter((a) => a.type === "price_hike" || (a.type === "unusual" && a.cap !== undefined && (a.asked ?? 0) > a.cap)).length;
@@ -443,7 +442,7 @@ function Home({ state, act, setSheet, setKill, goActivity, openAgent, goAgents, 
             </div>
           )}
           {open.length > 0 && (
-            <button className="peek" onClick={goAgents} aria-label={`View all agents (${open.length})`}>
+            <button className="peek" onClick={shopping.length ? goAgents : goSubs} aria-label={shopping.length ? `Your shopping agents (${shopping.length})` : "Your subscriptions"}>
               {peek.slice(0, 3).map((a, i, pile) => {
                 const tone = a === "subs" ? "bundle" : toneOf(a, activeMandate(state, a.id)?.mandate.item);
                 return (
@@ -582,7 +581,7 @@ function AgentsTab({ state, setSheet, openAgent, show, refresh, back, setKill, g
     .sort((a, b) => rank(a) - rank(b));
   const stackRef = useRef<HTMLDivElement>(null);
   const firstRun = useRef(true);
-  const switchTo = (v: "shopping" | "subs") => { rememberSeg(v); if (v === "subs") openGroup(); else closeGroup(); };
+  const switchTo = (v: "shopping" | "subs") => (v === "subs" ? openGroup() : closeGroup());
 
   // Tap a card: it lifts, the others drop away, then it flies on to become the agent's header card.
   const lift = (id: string, btn: HTMLElement) => {
@@ -631,7 +630,7 @@ function AgentsTab({ state, setSheet, openAgent, show, refresh, back, setKill, g
       {subs.length > 0 && (
         <div className="agents-seg">
           <Segmented<"shopping" | "subs"> value={inSubs ? "subs" : "shopping"} onChange={switchTo}
-            options={[{ value: "shopping", label: `Shopping ${shopping.length}` }, { value: "subs", label: `Subscriptions ${subs.length}` }]} />
+            options={[{ value: "shopping", label: "Shopping" }, { value: "subs", label: "Subscriptions" }]} />
         </div>
       )}
       {inSubs && (
