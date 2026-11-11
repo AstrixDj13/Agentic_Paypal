@@ -1,6 +1,6 @@
-# Paygent: PayPal Pocket
+# PayPal Pocket
 
-**PayPal already stores your automatic payments. Paygent makes them safe.**
+**PayPal already stores your automatic payments. Pocket makes them safe.**
 
 Capped, PIN-signed *pockets* for every subscription, bill and AI shopping agent. Every payment is checked by plain code against rules you signed **before** PayPal is called, and every decision is written to a tamper-evident Black Box.
 
@@ -41,7 +41,7 @@ Each pocket is an agent with its own balance, one job, and rules the user signs 
 
 All calls go directly to the PayPal REST APIs on the **sandbox** (`src/paypal/`).
 
-| API | Where | What it does in Paygent |
+| API | Where | What it does in PayPal Pocket |
 |---|---|---|
 | **OAuth 2.0** (`/v1/oauth2/token`) | `src/paypal/client.ts` | Server-to-server auth for every call. |
 | **Vault v3** (`/v3/vault/setup-tokens`, `/v3/vault/payment-tokens`) | `src/paypal/api.ts`, `src/app/service.ts` | "Connect PayPal" once. Pockets then pay with the vaulted method, so merchants never see a card. |
