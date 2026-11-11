@@ -4,6 +4,7 @@ import { money, savedThisMonth } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { Mark } from "./Brand";
 import { SignButton, type Signature } from "./lock";
+import { BrandAvatarGlyph, BrandTile, brandAvatarStyle, brandOf, isBrand, type BrandId } from "./brands";
 
 /** Kept so agents created earlier still have a colour on record. The UI no longer colour-codes agents. */
 export const AGENT_COLORS = ["#0070e0", "#7c4dff", "#e5489b", "#ff7a1a", "#19a35b", "#0aa5a5", "#d4a106", "#e5484d"];
@@ -32,7 +33,8 @@ export const PALETTE = [
   { id: "rose", label: "Rose", hex: "#ffb3c7" },
   { id: "grey", label: "Graphite", hex: "#d5dae2" },
 ] as const;
-export type AgentTone = (typeof PALETTE)[number]["id"];
+/** A palette colour, or (for subscription and bill pockets) the merchant's look. */
+export type AgentTone = (typeof PALETTE)[number]["id"] | BrandId;
 
 /** The job's default colour: shoes Sky, groceries Mint, tickets Lilac, coffee Peach, anything else Grey. */
 export function agentTone(item?: string): AgentTone {
@@ -41,7 +43,9 @@ export function agentTone(item?: string): AgentTone {
 }
 
 /** The agent's colour: the one the user picked (a palette colour), otherwise the job's default. */
-export function toneOf(agent: Pick<Pocket, "color"> | undefined, item?: string): AgentTone {
+export function toneOf(agent: (Pick<Pocket, "color"> & Partial<Pick<Pocket, "name" | "kind">>) | undefined, item?: string): AgentTone {
+  const brand = brandOf(agent);
+  if (brand) return brand;
   const picked = PALETTE.find((c) => c.hex === agent?.color?.toLowerCase());
   return picked ? picked.id : agentTone(item);
 }
@@ -63,6 +67,14 @@ export function monogram(name: string) {
  * Without one (a new agent still being set up): the job's icon in a rounded tile.
  */
 export function AgentIcon({ item, name, size = 44, paused = false, tone }: { item?: string; name?: string; size?: number; paused?: boolean; tone?: AgentTone }) {
+  if (name && isBrand(tone)) {
+    return (
+      <span className={`agent-icon mono brand-avatar tone-${tone} toned ${paused ? "paused" : ""}`}
+        style={{ width: size, height: size, fontSize: Math.round(size * 0.5), ...brandAvatarStyle(tone) }} aria-hidden="true">
+        <BrandAvatarGlyph id={tone} />
+      </span>
+    );
+  }
   if (name) {
     const m = monogram(name);
     return (
@@ -130,21 +142,24 @@ export function cardStats(state: AppState, agentId: string) {
  * Top strip (visible even when cards overlap): emblem, name, job, money left. Bottom: proof it's working, and status.
  * White text; gradients are deep enough to pass contrast in both themes.
  */
-export function AgentCardFace({ agent, item, left, total, status, saved, stopped = 0, tone }: {
-  agent: Pick<Pocket, "name" | "color">; item?: string; left: number; total: number; status?: string;
+export function AgentCardFace({ agent, item, left, total, status, saved, stopped = 0, tone, figure }: {
+  agent: Pick<Pocket, "name" | "color"> & Partial<Pick<Pocket, "kind">>; item?: string; left: number; total: number; status?: string;
   saved?: number; stopped?: number; tone?: AgentTone;
+  /** Replaces "$X left of $Y" (a subscription shows its price: "$22.99" / "a month"). */
+  figure?: { amount: string; cap: string };
 }) {
+  const t = tone ?? toneOf(agent, item);
   return (
-    <span className={`agent-face tone-${tone ?? toneOf(agent, item)}`}>
+    <span className={`agent-face tone-${t} ${isBrand(t) ? "is-brand" : ""}`}>
       <span className="face-top">
-        <span className="face-emblem" aria-hidden="true"><Mark size={30} mono /></span>
+        <span className={`face-emblem ${isBrand(t) ? "has-tile" : ""}`} aria-hidden="true">{isBrand(t) ? <BrandTile id={t} /> : <Mark size={30} mono />}</span>
         <span className="face-id">
           <span className="face-name">{agent.name}</span>
           <span className="face-job">{item ? `${item.charAt(0).toUpperCase()}${item.slice(1)}` : "No job yet"}</span>
         </span>
         <span className="face-money">
-          <span className="face-amount">{amount(left)}</span>
-          <span className="face-cap">left of {amount(total)}</span>
+          <span className="face-amount">{figure ? figure.amount : amount(left)}</span>
+          <span className="face-cap">{figure ? figure.cap : `left of ${amount(total)}`}</span>
         </span>
       </span>
       <span className="face-bottom">

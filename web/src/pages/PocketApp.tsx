@@ -21,7 +21,7 @@ import { AccountScreen } from "../components/account";
 import { AccountButton, AccountSheet } from "../components/accountSheet";
 import { AgentsStatus, PauseSheet, PausedBanner, type SetKill } from "../components/pause";
 import type { Signature } from "../components/lock";
-import { BillAlertCard, BillsSheet, DiscoveryCard, NextSevenDays, ProofSheet, isRecurring, pendingBillAlerts, subLine } from "../components/bills";
+import { BillAlertCard, BillsSheet, BundleFace, DiscoveryCard, NextSevenDays, ProofSheet, isRecurring, pendingBillAlerts, subFace } from "../components/bills";
 
 const UNLOCK_KEY = "pocket.unlocked";
 const readUnlocked = () => { try { return sessionStorage.getItem(UNLOCK_KEY) === "1"; } catch { return false; } };
@@ -166,6 +166,8 @@ export default function PocketApp() {
   const openAgent = (id: string, view?: "chat") => navigate(`/agents/${id}${view ? `?view=${view}` : ""}`);
   // Home → Agents: the Agents screen is pushed over Home (see AgentsLayer).
   const goAgents = () => navigate("/agents", { state: { push: true } });
+  // Subscriptions & bills live in their own small wallet inside Agents (/agents?g=subs).
+  const subsGroup = tab === "agents" && new URLSearchParams(search).get("g") === "subs";
   const mainRef = useRef<HTMLElement>(null);
   const [sheet, setSheet] = useState<SheetState>(null);
   const close = useCallback(() => setSheet(null), []);
@@ -257,6 +259,7 @@ export default function PocketApp() {
   // Updates: what needs you (also the number on the app icon) and anything new since you last looked.
   const { seenAt, markSeen } = useSeen();
   const needCount = state ? needsYou(state).length : 0;
+  const subAgent = !!(state && agentId && (() => { const p = state.pockets.find((x) => x.id === agentId); return p && isRecurring(state, p); })());
   const unread = state ? unreadCount(state, seenAt) : 0;
   useAppBadge(needCount);
   const canPull = !!state && !sheet && (tab === "home" || tab === "agents" || tab === "activity" || tab === "blackbox" || tab === "knows");
@@ -304,7 +307,7 @@ export default function PocketApp() {
               {(tab === "home" || tab === "agents") && <Home state={state} act={act} setSheet={setSheet} setKill={setKill} goActivity={(f) => navigate(f ? `/activity?f=${f}` : "/activity")} openAgent={openAgent} goAgents={goAgents} goBlackBox={() => navigate("/console")} makeAgent={makeAgent} openKnows={() => navigate("/knows")} snap={snap.open} accountEmail={account.mode === "accounts" ? account.email : null} openAccount={() => setSheet({ kind: "account" })} updates={{ needs: needCount, unread, open: () => setSheet({ kind: "updates" }) }} />}
               {tab === "knows" && <KnowsPage back={() => navigate("/")} onUse={makeAgent} onSnap={snap.open} show={show} />}
               {tab === "share" && <SharePage onResult={onShared} show={show} done={shareDone} />}
-              {tab === "agent" && <AgentPage state={state} agentId={agentId} act={act} refresh={refresh} show={show} setSheet={setSheet} back={() => navigate("/agents")} />}
+              {tab === "agent" && <AgentPage state={state} agentId={agentId} act={act} refresh={refresh} show={show} setSheet={setSheet} back={() => navigate(subAgent ? "/agents?g=subs" : "/agents")} />}
               {tab === "activity" && <Activity key={search} initial={(new URLSearchParams(search).get("f") as Filter) ?? "all"} state={state} setSheet={setSheet} openBlackBox={() => navigate("/console")} />}
               {tab === "blackbox" && (
                 <>
@@ -322,7 +325,8 @@ export default function PocketApp() {
         {tab === "agents" && state && (
           <AgentsLayer under={mainRef} animateIn={!!(locState as { push?: boolean } | null)?.push} onBack={() => navigate("/")}
             onScroll={(e) => { const sc = e.currentTarget.scrollTop > 56; if (sc !== scrolled) setScrolled(sc); }}>
-            {(goBack) => <AgentsTab state={state} setSheet={setSheet} openAgent={openAgent} show={show} refresh={refresh} back={goBack} setKill={setKill} />}
+            {(goBack) => <AgentsTab state={state} setSheet={setSheet} openAgent={openAgent} show={show} refresh={refresh} back={goBack} setKill={setKill}
+              group={subsGroup} openGroup={() => navigate("/agents?g=subs")} closeGroup={() => navigate("/agents", { replace: true })} />}
           </AgentsLayer>
         )}
 
@@ -395,6 +399,9 @@ function Home({ state, act, setSheet, setKill, goActivity, openAgent, goAgents, 
   const spentMonth = state.purchases
     .filter((p) => (p.status === "completed" || p.status === "disputed" || p.status === "escalated") && Date.parse(p.createdAt) >= monthStart.getTime())
     .reduce((s, p) => s + p.total, 0);
+  // The cards peeking in from the right mirror the Agents wallet: all subscriptions & bills are one card there.
+  const shopping = open.filter((p) => !isRecurring(state, p));
+  const peek: (typeof open[number] | "subs")[] = shopping.length < open.length ? ["subs", ...shopping] : shopping;
   // Trust tiles: proof the rules work, and proof you're covered.
   // Charges your caps stopped count too (a subscription price hike, a bill over its limit).
   const stopped = state.purchases.filter((p) => p.status === "blocked").length + (state.bills?.alerts ?? []).filter((a) => a.type === "price_hike" || (a.type === "unusual" && a.cap !== undefined && (a.asked ?? 0) > a.cap)).length;
@@ -430,15 +437,15 @@ function Home({ state, act, setSheet, setKill, goActivity, openAgent, goAgents, 
           )}
           {open.length > 0 && (
             <button className="peek" onClick={goAgents} aria-label={`View all agents (${open.length})`}>
-              {open.slice(0, 3).map((a, i, pile) => {
-                const item = activeMandate(state, a.id)?.mandate.item;
+              {peek.slice(0, 3).map((a, i, pile) => {
+                const tone = a === "subs" ? "bundle" : toneOf(a, activeMandate(state, a.id)?.mandate.item);
                 return (
-                  <span key={a.id} className={`peek-card tone-${toneOf(a, item)}`} style={{ "--i": i } as React.CSSProperties} aria-hidden="true">
+                  <span key={a === "subs" ? "subs" : a.id} className={`peek-card tone-${tone}`} style={{ "--i": i } as React.CSSProperties} aria-hidden="true">
                     {i === pile.length - 1 && <Mark size={22} mono />}
                   </span>
                 );
               })}
-              {open.length > 3 && <span className="peek-more" aria-hidden="true">+{open.length - 3}</span>}
+              {peek.length > 3 && <span className="peek-more" aria-hidden="true">+{peek.length - 3}</span>}
             </button>
           )}
         </div>
@@ -539,23 +546,29 @@ function Home({ state, act, setSheet, setKill, goActivity, openAgent, goAgents, 
 
 /* ====================================== Agents (the wallet) ====================================== */
 
-function AgentsTab({ state, setSheet, openAgent, show, refresh, back, setKill }: {
+function AgentsTab({ state, setSheet, openAgent, show, refresh, back, setKill, group, openGroup, closeGroup }: {
   state: AppState; setSheet: (s: SheetState) => void; openAgent: (id: string, view?: "chat") => void;
   show: (t: string, e?: boolean, action?: { label: string; run: () => void }) => void; refresh: () => Promise<void> | void;
   /** Slides the Agents layer away, back to Home. */
   back: () => void;
   setKill: SetKill;
+  /** Showing the subscriptions & bills wallet instead of the main one. */
+  group: boolean; openGroup: () => void; closeGroup: () => void;
 }) {
   const open = state.pockets.filter((p) => !p.closedAt);
   const closed = state.pockets.filter((p) => p.closedAt);
   const [q, setQ] = useState("");
   const [showClosed, setShowClosed] = useState(false);
-  // Needs you first, then active, then paused.
-  // Subscriptions & bills first (the everyday money), then shopping. Inside each: needs you, active, paused.
-  const rank = (p: typeof open[number]) => (isRecurring(state, p) ? 0 : 10) + (pendingFor(state, p.id) > 0 || pendingBillAlerts(state).some((a) => a.agentId === p.id) ? 0 : p.paused ? 2 : 1);
-  const shown = open
-    .filter((p) => !q.trim() || `${p.name} ${activeMandate(state, p.id)?.mandate.item ?? ""}`.toLowerCase().includes(q.trim().toLowerCase()))
+  // Subscriptions & bills are passive money: in the main wallet they're ONE card (the bundle) that opens their own
+  // wallet. Searching looks through everything. Order inside a wallet: needs you, active, paused.
+  const subs = open.filter((p) => isRecurring(state, p));
+  const searching = !group && !!q.trim();
+  const pool = group ? subs : searching ? open : open.filter((p) => !isRecurring(state, p));
+  const rank = (p: typeof open[number]) => (pendingFor(state, p.id) > 0 || pendingBillAlerts(state).some((a) => a.agentId === p.id) ? 0 : p.paused ? 2 : 1);
+  const shown = pool
+    .filter((p) => !searching || `${p.name} ${activeMandate(state, p.id)?.mandate.item ?? ""}`.toLowerCase().includes(q.trim().toLowerCase()))
     .sort((a, b) => rank(a) - rank(b));
+  const bundle = !group && !searching && subs.length > 0;
   const stackRef = useRef<HTMLDivElement>(null);
 
   // Tap a card: it lifts, the others drop away, then it flies on to become the agent's header card.
@@ -568,30 +581,57 @@ function AgentsTab({ state, setSheet, openAgent, show, refresh, back, setKill }:
       { duration: 200, delay: i * 18, easing: "cubic-bezier(0.4, 0, 1, 1)", fill: "forwards" }));
     btn.style.zIndex = "4";
     btn.animate([{ transform: "scale(1)" }, { transform: "scale(1.02)" }], { duration: 140, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)", fill: "forwards" });
-    setTimeout(() => { launch(id, face.getBoundingClientRect()); openAgent(id); }, 120);
+    setTimeout(() => { launch(id, face.getBoundingClientRect()); if (id === "subs") openGroup(); else openAgent(id); }, 120);
+  };
+
+  // Leaving the subscriptions wallet: the cards drop away and the bundle card flies back into its slot.
+  const leaveGroup = () => {
+    const first = stackRef.current?.querySelector<HTMLElement>(".agent-face");
+    if (!first || reducedMotion()) { closeGroup(); return; }
+    [...(stackRef.current?.children ?? [])].forEach((el, i) => (el as HTMLElement).animate(
+      [{ opacity: 1, transform: "translate3d(0,0,0)" }, { opacity: i ? 0 : 1, transform: `translate3d(0,${-i * 40}px,0)` }],
+      { duration: 180, delay: i * 12, easing: "cubic-bezier(0.4, 0, 1, 1)", fill: "forwards" }));
+    setTimeout(() => { launch("subs", first.getBoundingClientRect()); closeGroup(); }, 110);
   };
 
   // Coming back from an agent: its card flies home into its slot; the rest of the wallet rises in around it.
   useLayoutEffect(() => {
+    stackRef.current?.closest<HTMLElement>(".push-layer")?.scrollTo({ top: 0 });
     const f = land();
     if (!f || reducedMotion()) return;
+    // Into the subscriptions wallet: the merchant cards unfold out of the bundle card, top one first.
+    if (group && f.id === "subs") {
+      [...(stackRef.current?.children ?? [])].forEach((el, i) => {
+        const dy = f.rect.top - (el as HTMLElement).getBoundingClientRect().top;
+        (el as HTMLElement).animate(
+          [{ opacity: i ? 0 : 1, transform: `translate3d(0,${dy}px,0) scale(${i ? 0.96 : 1})` }, { opacity: 1, transform: "translate3d(0,0,0) scale(1)" }],
+          { duration: SPRING.duration + i * 40, delay: i * 28, easing: SPRING.easing, fill: "backwards" });
+      });
+      return;
+    }
     const btn = stackRef.current?.querySelector<HTMLElement>(`[data-agent="${f.id}"]`);
     const face = btn?.querySelector<HTMLElement>(".agent-face");
     if (face) flyFrom(face, f.rect);
     [...(stackRef.current?.children ?? [])].filter((el) => el !== btn).forEach((el, i) => (el as HTMLElement).animate(
       [{ opacity: 0, transform: "translate3d(0,40px,0)" }, { opacity: 1, transform: "translate3d(0,0,0)" }],
       { duration: 420, delay: 80 + i * 35, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)", fill: "backwards" }));
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [group]);
 
   return (
     <>
       <div className="agents-top">
-        <button className="glass-circle" onClick={back} aria-label="Back to Home"><Icon name="chevronLeft" size={22} /></button>
-        <h1 className="agents-title">Agents</h1>
-        <button className="glass-circle new-agent-btn" onClick={() => setSheet({ kind: "agent" })} aria-label="New agent"><Icon name="plus" size={22} /></button>
+        <button className="glass-circle" onClick={group ? leaveGroup : back} aria-label={group ? "Back to agents" : "Back to Home"}><Icon name="chevronLeft" size={22} /></button>
+        <h1 className="agents-title">{group ? "Subscriptions" : "Agents"}</h1>
+        <button className="glass-circle new-agent-btn" onClick={() => setSheet({ kind: group ? "bills" : "agent" })} aria-label={group ? "Add a subscription or bill" : "New agent"}><Icon name="plus" size={22} /></button>
       </div>
       {state.killSwitch && open.length > 0 && <PausedBanner setKill={setKill} />}
-      {open.length > 6 && <input className="input search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search agents" aria-label="Search agents" />}
+      {group && (
+        <p className="footnote muted group-sum">
+          {subs.length} {subs.length === 1 ? "payment" : "payments"} · {amount(Math.round((state.bills?.monthly ?? 0) * 100) / 100)} a month · each with its own cap
+        </p>
+      )}
+      {!group && open.length > 6 && <input className="input search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search agents" aria-label="Search agents" />}
 
       {open.length === 0 ? (
         <button className="card empty tappable" onClick={() => setSheet({ kind: "agent" })}>
@@ -601,30 +641,34 @@ function AgentsTab({ state, setSheet, openAgent, show, refresh, back, setKill }:
         </button>
       ) : (
         // A wallet: gradient cards, overlapping like Apple Wallet when there are several. Tap a card to open it.
-        <div ref={stackRef} className={`wallet-stack ${shown.length > 2 ? "overlap" : ""}`}>
-          {shown.length === 0 && <p className="subhead muted">No agents match “{q}”.</p>}
-          {shown.map((p, i) => {
+        <div ref={stackRef} key={group ? "subs" : "main"} className={`wallet-stack ${shown.length + (bundle ? 1 : 0) > 2 ? "overlap" : ""}`}>
+          {shown.length === 0 && !bundle && <p className="subhead muted">{group ? "No subscriptions or bills yet." : `No agents match “${q}”.`}</p>}
+          {bundle && (
+            <button key="subs" className="agent-card wallet-item agent-row-main bundle-item" data-agent="subs" data-flight onClick={(e) => lift("subs", e.currentTarget)}
+              aria-label={`Subscriptions and bills: ${subs.length} payments, ${amount(state.bills?.monthly ?? 0)} a month`}>
+              <BundleFace state={state} ids={subs.map((p) => p.id)} />
+            </button>
+          )}
+          {shown.map((p) => {
             const rec = isRecurring(state, p);
-            const head = rec !== (i > 0 && isRecurring(state, shown[i - 1])) || i === 0
-              ? <h2 key={`h-${p.id}`} className="wallet-section">{rec ? "Subscriptions & bills" : "Shopping"}</h2> : null;
             const m = activeMandate(state, p.id)?.mandate;
             const b = budgetOf(state, p);
             const unread = unreadFor(state, p);
-            const waiting = pendingFor(state, p.id);
+            const waiting = pendingFor(state, p.id) || pendingBillAlerts(state).some((a) => a.agentId === p.id);
             const off = state.killSwitch || p.paused;
             const ended = m && Date.parse(m.expiresAt) < Date.now();
             const status = waiting ? "Needs you" : off ? "Paused" : ended ? "Job ended" : unread ? `${unread} new` : undefined;
-            return [head, (
+            return (
               <button key={p.id} className="agent-card wallet-item agent-row-main" data-agent={p.id} data-flight onClick={(e) => lift(p.id, e.currentTarget)}
                 aria-label={`${p.name}, ${money(b.left)} left of ${money(b.total)}${status ? `, ${status}` : ""}`}>
-                <AgentCardFace agent={p} item={rec ? subLine(state, p.id) : m?.item} left={b.left} total={b.total} status={status} {...cardStats(state, p.id)} />
+                <AgentCardFace agent={p} item={rec ? subFace(state, p.id)?.item : m?.item} figure={rec ? subFace(state, p.id)?.figure : undefined} left={b.left} total={b.total} status={status} {...cardStats(state, p.id)} />
               </button>
-            )];
+            );
           })}
         </div>
       )}
 
-      {closed.length > 0 && (
+      {!group && closed.length > 0 && (
         <section className="stack-sm">
           <button className="closed-toggle" aria-expanded={showClosed} aria-controls="closed-agents" onClick={() => setShowClosed(!showClosed)}>
             <span className="grow">Closed agents ({closed.length})</span>

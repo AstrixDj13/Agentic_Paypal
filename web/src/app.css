@@ -1493,3 +1493,60 @@ html.app-locked, html.app-locked body { overflow: hidden; overscroll-behavior: n
 .proof-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .proof-list li { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
 .new-bill-row { margin-top: 4px; text-align: left; }
+
+
+/* ------------------------------ Merchant cards (subscriptions and bills) ------------------------------ */
+/* Like passes in Wallet: each subscription or bill card wears its merchant's colours. Same recipe as the agent tones
+   (a glow top right, a second glow bottom left, a deep base) so white text holds contrast; shopping cards keep the palette. */
+.tone-netflix { --face: radial-gradient(80% 75% at 100% 0%, #b20710 0%, transparent 60%), radial-gradient(90% 80% at 0% 115%, #6e0309 0%, transparent 62%), linear-gradient(140deg, #1c1c1c 0%, #0a0a0a 100%); --face-edge: linear-gradient(175deg, #b20710 0%, #1c1c1c 50%, #0a0a0a 100%); --face-solid: #141414; }
+.tone-spotify { --face: radial-gradient(80% 75% at 100% 0%, #1a9e4b 0%, transparent 60%), radial-gradient(90% 80% at 0% 115%, #0e6b31 0%, transparent 62%), linear-gradient(140deg, #1a1a1a 0%, #0b0b0b 100%); --face-edge: linear-gradient(175deg, #1a9e4b 0%, #1a1a1a 50%, #0b0b0b 100%); --face-solid: #121212; }
+.tone-applemusic { --face: radial-gradient(80% 75% at 100% 0%, #fb5c74 0%, transparent 60%), radial-gradient(90% 80% at 0% 115%, #b0102a 0%, transparent 62%), linear-gradient(140deg, #e2203a 0%, #b5142c 100%); --face-edge: linear-gradient(175deg, #fb5c74 0%, #e2203a 50%, #b5142c 100%); --face-solid: #d61f38; }
+.tone-icloud { --face: radial-gradient(80% 75% at 100% 0%, #4aa3ff 0%, transparent 60%), radial-gradient(90% 80% at 0% 115%, #1a4fb0 0%, transparent 62%), linear-gradient(140deg, #1f6fe0 0%, #1757b8 100%); --face-edge: linear-gradient(175deg, #4aa3ff 0%, #1f6fe0 50%, #1757b8 100%); --face-solid: #1f6fe0; }
+.tone-gym { --face: radial-gradient(80% 75% at 100% 0%, #f07a1c 0%, transparent 60%), radial-gradient(90% 80% at 0% 115%, #8a2e07 0%, transparent 62%), linear-gradient(140deg, #c2490d 0%, #933508 100%); --face-edge: linear-gradient(175deg, #f07a1c 0%, #c2490d 50%, #933508 100%); --face-solid: #c2490d; }
+.tone-power { --face: radial-gradient(80% 75% at 100% 0%, #d29200 0%, transparent 60%), radial-gradient(90% 80% at 0% 115%, #5a3a00 0%, transparent 62%), linear-gradient(140deg, #8f5f00 0%, #5e3d00 100%); --face-edge: linear-gradient(175deg, #d29200 0%, #8f5f00 50%, #5e3d00 100%); --face-solid: #8f5f00; }
+.tone-study { --face: radial-gradient(80% 75% at 100% 0%, #8f6bff 0%, transparent 60%), radial-gradient(90% 80% at 0% 115%, #2c1680 0%, transparent 62%), linear-gradient(140deg, #5630d6 0%, #3d1fa3 100%); --face-edge: linear-gradient(175deg, #8f6bff 0%, #5630d6 50%, #3d1fa3 100%); --face-solid: #5630d6; }
+.tone-gas { --face: radial-gradient(80% 75% at 100% 0%, #0ea5a5 0%, transparent 60%), radial-gradient(90% 80% at 0% 115%, #033f40 0%, transparent 62%), linear-gradient(140deg, #077173 0%, #05494b 100%); --face-edge: linear-gradient(175deg, #0ea5a5 0%, #077173 50%, #05494b 100%); --face-solid: #077173; }
+.tone-phone { --face: radial-gradient(80% 75% at 100% 0%, #8a94a6 0%, transparent 60%), radial-gradient(90% 80% at 0% 115%, #1f2937 0%, transparent 62%), linear-gradient(140deg, #4b5563 0%, #2f3846 100%); --face-edge: linear-gradient(175deg, #8a94a6 0%, #4b5563 50%, #2f3846 100%); --face-solid: #4b5563; }
+
+/* The merchant's mark: an app-icon tile where the PayPal mark sits on shopping cards */
+.face-emblem.has-tile { width: 36px; height: 36px; margin-top: 0; opacity: 1; justify-content: center; }
+.brand-tile { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; flex: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), inset 0 0 0 0.5px rgba(255, 255, 255, 0.25); }
+.brand-tile.round { border-radius: 50%; }
+.brand-tile.frost { background: rgba(255, 255, 255, 0.18); color: #fff; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.brand-glyph { width: 60%; height: 60%; display: grid; place-items: center; line-height: 1; }
+.brand-letter { font-size: 26px; font-weight: 900; letter-spacing: -0.04em; transform: scaleX(0.82); font-family: "Bebas Neue", "Arial Narrow", "Helvetica Neue", Arial, sans-serif; }
+.agent-icon.brand-avatar .brand-glyph { width: 58%; height: 58%; }
+.agent-icon.brand-avatar .brand-letter { font-size: 1em; }
+.agent-face.is-brand .face-name { font-size: 18px; letter-spacing: -0.01em; }
+
+/* The numbers in a bill alert / the bill panel: three equal tiles that always fit, labels on one line */
+.bill-compare { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.bill-compare > span { padding: 8px 10px; min-width: 0; }
+.bill-compare .caption { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bill-compare strong { font-size: var(--text-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bill-alert.warn .bill-compare > span.asked strong { color: var(--warn, #b45309); }
+.sub-panel .sub-facts { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; align-self: stretch; width: 100%; }
+.sub-panel .sub-facts > span { padding: 8px 10px; min-width: 0; }
+.sub-panel .sub-facts .caption { white-space: nowrap; }
+
+/* ------------------------------ The subscriptions bundle card + a tighter wallet ------------------------------ */
+/* Graphite, like a premium card: the merchant tiles bring the colour. */
+.tone-bundle { --face: radial-gradient(80% 75% at 100% 0%, #5a6170 0%, transparent 60%), radial-gradient(90% 80% at 0% 115%, #2a2f3a 0%, transparent 62%), linear-gradient(140deg, #2b2f38 0%, #17191f 100%); --face-edge: linear-gradient(175deg, #5a6170 0%, #2b2f38 50%, #17191f 100%); --face-solid: #2b2f38; }
+/* Three merchant tiles fanned where the emblem sits, so the top strip says "subscriptions" even when covered */
+.bundle-marks { flex: none; display: flex; align-items: center; height: 36px; padding-right: 2px; }
+.bundle-marks .brand-tile { width: 30px; height: 30px; border-radius: 8px; box-shadow: 0 0 0 2px #23262e, 0 1px 2px rgba(0, 0, 0, 0.35); }
+.bundle-marks .brand-tile.round { border-radius: 50%; }
+.bundle-marks .brand-tile + .brand-tile { margin-left: -12px; }
+.bundle-marks .brand-tile .brand-letter { font-size: 21px; }
+.bundle-face .face-name { font-size: var(--text-body); }
+.bundle-face .face-job.bundle-needs { color: #ffd27a; font-weight: 600; }
+/* The full set along the bottom, visible when the bundle card isn't covered */
+.bundle-strip { flex: 1; min-width: 0; display: flex; gap: 8px; overflow: hidden; }
+.bundle-strip .brand-tile { width: 32px; height: 32px; border-radius: 9px; }
+.bundle-strip .brand-tile.round { border-radius: 50%; }
+.bundle-strip .brand-tile .brand-letter { font-size: 22px; }
+.group-sum { margin: -4px 4px 2px; text-align: center; }
+
+/* Wallet density: each covered card shows just its top strip (name, line, amount), like passes in Wallet */
+.wallet-stack.overlap .wallet-item + .wallet-item { margin-top: -130px; }

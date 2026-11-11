@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { api, money, when, type AppState, type LedgerEntry, type Pocket } from "../api";
 import { Icon } from "./Icon";
 import { SignButton } from "./lock";
+import { amount } from "./agent";
+import { BrandTile, brandOf, type BrandId } from "./brands";
 import type { Act } from "./purchase";
 
 /**
@@ -44,6 +46,25 @@ export function subLine(state: AppState, agentId: string): string | undefined {
   if (s.status === "cancelled") return "Cancelled";
   if (s.status === "trial") return `Free trial · ${money(s.price)}/mo from ${short(s.trialEndsAt!)}`;
   return `${s.kind === "bill" ? "~" : ""}${money(s.price)} a month · next ${short(s.nextChargeAt)}`;
+}
+
+/**
+ * What a subscription pocket's card shows instead of "money left": the price you pay and when.
+ *   Netflix   $22.99 / a month    "Next 14 Nov · cap $23"
+ *   City Power   ~$90 / a month   "Next 17 Nov · never over $180"
+ *   StudyPro     Free / until 14 Nov   "Then $9.99 a month"
+ */
+export function subFace(state: AppState, agentId: string): { item: string; figure: { amount: string; cap: string }; head: string } | undefined {
+  const s = state.bills?.subs.find((x) => x.agentId === agentId);
+  if (!s) return undefined;
+  const price = `${s.kind === "bill" ? "~" : ""}${amount(s.price)}`;
+  if (s.status === "cancelled") return { item: `Was ${price} a month`, figure: { amount: "Off", cap: s.kind === "bill" ? "Not paying" : "Cancelled" }, head: "Cancelled" };
+  if (s.status === "trial") return { item: `Then ${amount(s.price)} a month`, figure: { amount: "Free", cap: `until ${short(s.trialEndsAt!)}` }, head: `Free until ${short(s.trialEndsAt!)}` };
+  return {
+    item: `Next ${short(s.nextChargeAt)} · ${s.kind === "bill" ? "never over" : "cap"} ${amount(s.cap)}`,
+    figure: { amount: price, cap: "a month" },
+    head: `${price} a month`,
+  };
 }
 
 const day = (iso: string) => new Date(iso).toLocaleDateString([], { weekday: "short" });
@@ -171,7 +192,7 @@ export function BillsSheet({ act, close, openAgent }: { act: Act; close: () => v
 const ALERT_ICON = { price_hike: "up", trial_end: "clock", duplicate: "copy", unusual: "alert" } as const;
 
 /** One moment that matters, with its proof and its decision. */
-export function BillAlertCard({ state, a, act, openProof, openAgent }: { state: AppState; a: BillAlert; act: Act; openProof: (id: string) => void; openAgent?: (id: string) => void }) {
+export function BillAlertCard({ state, a, act, openProof, openAgent, inChat }: { state: AppState; a: BillAlert; act: Act; openProof: (id: string) => void; openAgent?: (id: string) => void; inChat?: boolean }) {
   const sub = state.bills?.subs.find((s) => s.agentId === a.agentId);
   const other = a.otherAgentId ? state.bills?.subs.find((s) => s.agentId === a.otherAgentId) : undefined;
   const live = a.status === "pending" || (a.status === "held" && a.type === "unusual");
@@ -185,13 +206,13 @@ export function BillAlertCard({ state, a, act, openProof, openAgent }: { state: 
         {a.type === "price_hike" ? "Price hike stopped" : a.type === "trial_end" ? "Trial ending" : a.type === "duplicate" ? "Paying twice?" : "Unusual bill"}
         {openAgent && <button className="link-btn caption" onClick={() => openAgent(a.agentId)}>· {name}</button>}
       </span>
-      <p className="subhead">{a.text}</p>
+      {/* In the chat, the agent's message right above already says this. */}
+      {!inChat && <p className="subhead">{a.text}</p>}
       {(a.type === "price_hike" || a.type === "unusual") && a.asked !== undefined && (
-        <div className="ask-compare">
-          <span><span className="caption muted">{a.type === "price_hike" ? "Was" : "Usually"}</span><strong>{money(a.usual)}</strong></span>
-          <Icon name="chevronRight" size={14} />
-          <span><span className="caption muted">Asked</span><strong>{money(a.asked)}</strong></span>
-          <span><span className="caption muted">{a.type === "price_hike" ? "Your cap" : "Never over"}</span><strong>{money(a.cap)}</strong></span>
+        <div className="ask-compare bill-compare">
+          <span><span className="caption muted">{a.type === "price_hike" ? "Was" : "Usual"}</span><strong>{amount(a.usual ?? 0)}</strong></span>
+          <span className="asked"><span className="caption muted">{a.type === "price_hike" ? "Now" : "This bill"}</span><strong>{amount(a.asked)}</strong></span>
+          <span><span className="caption muted">{a.type === "price_hike" ? "Your cap" : "Max"}</span><strong>{amount(a.cap ?? 0)}</strong></span>
         </div>
       )}
       {a.did && <p className="footnote row" style={{ gap: 6 }}><Icon name="shield" size={14} className="ok-text" />{a.did}</p>}
@@ -202,12 +223,12 @@ export function BillAlertCard({ state, a, act, openProof, openAgent }: { state: 
           <SignButton title="Approve the new price" detail={`${name} · ${money(a.asked)} a month`}
             approval={{ amount: a.asked, rows: [{ label: "Old price", value: money(a.usual) }, { label: "New price", value: money(a.asked) }, { label: "New cap", value: `${money(a.asked)} a month` }] }}
             progress={{ working: "Paying with PayPal", done: "New price approved" }}
-            onSigned={(auth) => act(() => api(`/api/bills/alerts/${a.id}/approve-price`, { auth }), undefined, { rethrow: true })}>Approve new price</SignButton>
+            onSigned={(auth) => act(() => api(`/api/bills/alerts/${a.id}/approve-price`, { auth }), undefined, { rethrow: true })}>Approve</SignButton>
         </div>
       )}
       {live && a.type === "unusual" && (
         <div className="action-pair">
-          {a.status === "pending" ? <button className="btn tonal" onClick={() => act(() => api(`/api/bills/alerts/${a.id}/hold`, {}), "Held. Nothing paid.")}>Hold and check</button>
+          {a.status === "pending" ? <button className="btn tonal" onClick={() => act(() => api(`/api/bills/alerts/${a.id}/hold`, {}), "Held. Nothing paid.")}>Hold it</button>
             : <span className="badge neutral">Held</span>}
           <SignButton title={`Pay ${name}`} detail={`${money(a.asked)} this once`}
             approval={{ amount: a.asked, rows: [{ label: "Usually", value: money(a.usual) }, { label: "This bill", value: money(a.asked) }, { label: "Applies", value: "This bill only" }] }}
@@ -300,14 +321,14 @@ export function SubPanel({ state, agent, act }: { state: AppState; agent: Pocket
       <span className="caption muted">{sub.kind === "bill" ? "Bill" : "Subscription"} · simulated merchant</span>
       <h2 className="headline">{sub.status === "cancelled" ? `${sub.name} is cancelled` : sub.status === "trial" ? `Free trial until ${short(nextAt)}` : `Next charge ${short(nextAt)}`}</h2>
       <div className="ask-compare sub-facts">
-        <span><span className="caption muted">{sub.kind === "bill" ? "Usually" : "Price"}</span><strong>{sub.kind === "bill" ? "~" : ""}{money(sub.price)}</strong></span>
-        <span><span className="caption muted">{sub.kind === "bill" ? "Never over" : "Cap"}</span><strong>{money(sub.cap)}</strong></span>
-        {sub.lastPaid && <span><span className="caption muted">Last paid</span><strong>{money(sub.lastPaid.amount)}</strong></span>}
+        <span><span className="caption muted">{sub.kind === "bill" ? "Usual" : "Price"}</span><strong>{sub.kind === "bill" ? "~" : ""}{amount(sub.price)}</strong></span>
+        <span><span className="caption muted">{sub.kind === "bill" ? "Max" : "Cap"}</span><strong>{amount(sub.cap)}</strong></span>
+        {sub.lastPaid && <span><span className="caption muted">Last paid</span><strong>{amount(sub.lastPaid.amount)}</strong></span>}
       </div>
       <p className="footnote">
         {sub.kind === "bill"
-          ? `Pays when the bill is within ${sub.varyPct ?? 20}% of usual. Above ${money(sub.price * (1 + (sub.varyPct ?? 20) / 100))} it asks you first.`
-          : `Pays ${sub.name} up to ${money(sub.cap)} a month, not a cent more.`} Paid from this pocket through PayPal; {sub.name} never gets your card.
+          ? `Pays when the bill is within ${sub.varyPct ?? 20}% of usual. Above ${amount(Math.round(sub.price * (1 + (sub.varyPct ?? 20) / 100) * 100) / 100)} it asks you first, and it never pays over ${amount(sub.cap)}.`
+          : `Pays ${sub.name} up to ${amount(sub.cap)} a month, not a cent more.`} Paid from this pocket through PayPal; {sub.name} never gets your card.
       </p>
       {sub.status !== "cancelled" && (
         editing ? (
@@ -323,10 +344,49 @@ export function SubPanel({ state, agent, act }: { state: AppState; agent: Pocket
         ) : (
           <div className="row intro-actions">
             <button className="link-btn" onClick={() => { setCap(String(sub.cap)); setEditing(true); }}>Change cap</button>
-            <button className="link-btn danger-text" onClick={() => act(() => api(`/api/bills/${agent.id}/cancel`, {}), `${sub.name} cancelled. It won't be paid again.`)}>Cancel subscription</button>
+            <button className="link-btn danger-text" onClick={() => act(() => api(`/api/bills/${agent.id}/cancel`, {}), sub.kind === "bill" ? `Stopped paying ${sub.name}.` : `${sub.name} cancelled. It won't be paid again.`)}>{sub.kind === "bill" ? "Stop paying" : "Cancel subscription"}</button>
           </div>
         )
       )}
     </section>
+  );
+}
+
+/* ------------------------------------ The bundle card (Agents wallet) ------------------------------------ */
+
+/**
+ * All subscriptions and bills as ONE card in the Agents wallet: they're passive money, so they shouldn't push your
+ * shopping agents off the screen. The top strip (all you see when cards overlap) carries everything that matters:
+ * the merchants at a glance, the monthly total, what's next, and whether something needs you.
+ * Tapping it lifts it like any card and opens the subscriptions wallet, where the merchant cards unfold out of it.
+ */
+export function BundleFace({ state, ids }: { state: AppState; ids: string[] }) {
+  const b = state.bills;
+  const pockets = ids.map((id) => state.pockets.find((p) => p.id === id)).filter(Boolean) as Pocket[];
+  const marks = pockets.map((p) => brandOf(p)).filter(Boolean) as BrandId[];
+  const needs = pendingBillAlerts(state).filter((a) => ids.includes(a.agentId)).length;
+  const next = [...(b?.upcoming ?? [])].filter((u) => ids.includes(u.agentId)).sort((x, y) => x.inDays - y.inDays)[0];
+  const when = next ? (next.inDays === 0 ? "today" : next.inDays === 1 ? "tomorrow" : next.inDays <= 6 ? day(next.at) : short(next.at)) : "";
+  const line = needs ? `${needs} need${needs === 1 ? "s" : ""} you` : next ? `Next: ${next.name}, ${when}` : `${ids.length} payments`;
+  return (
+    <span className="agent-face tone-bundle is-brand bundle-face">
+      <span className="face-top">
+        <span className="bundle-marks" aria-hidden="true">
+          {marks.slice(0, 3).map((m) => <BrandTile key={m} id={m} />)}
+        </span>
+        <span className="face-id">
+          <span className="face-name">Subscriptions</span>
+          <span className={`face-job ${needs ? "bundle-needs" : ""}`}>{line}</span>
+        </span>
+        <span className="face-money">
+          <span className="face-amount">{amount(Math.round((b?.monthly ?? 0) * 100) / 100)}</span>
+          <span className="face-cap">a month</span>
+        </span>
+      </span>
+      <span className="face-bottom">
+        <span className="bundle-strip" aria-hidden="true">{marks.map((m) => <BrandTile key={m} id={m} />)}</span>
+        {needs > 0 && <span className="face-status">Needs you</span>}
+      </span>
+    </span>
   );
 }

@@ -10,7 +10,7 @@ import { LOOK_OPTIONS, LookCard } from "../components/intel";
 import { NowCard, OrderCard, StoreOfferCard } from "../components/orders";
 import type { SheetState } from "./PocketApp";
 import { RestoreButton } from "../components/agentSheets";
-import { BillAlertCard, SubPanel, pendingBillAlerts, subLine } from "../components/bills";
+import { BillAlertCard, SubPanel, pendingBillAlerts, subFace } from "../components/bills";
 
 type Show = (t: string, e?: boolean, action?: { label: string; run: () => void }) => void;
 
@@ -106,6 +106,7 @@ export default function AgentPage({ state, agentId, act, refresh, show, setSheet
   const doing = agent.closedAt ? "Closed" : status.text;
   const off = state.killSwitch || agent.paused;
   const openDetails = () => setSheet({ kind: "details", id: agent.id });
+  const sub = subFace(state, agent.id);
   const cardStatus = agent.closedAt ? "Closed" : off ? "Paused" : status.text === "Waiting on you" ? "Needs you" : undefined;
 
   // Back: the card flies home to its slot in the wallet (if it's still on screen).
@@ -134,7 +135,7 @@ export default function AgentPage({ state, agentId, act, refresh, show, setSheet
             <span className="grow stack-xs id-text">
               <span className="headline ellipsis">{agent.name}</span>
               <span className="footnote muted ellipsis id-sub">
-                <strong className="id-money">{amount(b.left)} left</strong>
+                <strong className="id-money">{sub ? sub.head : `${amount(b.left)} left`}</strong>
                 <span aria-hidden="true">·</span>
                 {!agent.closedAt && <span className={`presence-dot ${status.tone}`} aria-hidden="true" />}
                 {doing}
@@ -149,7 +150,7 @@ export default function AgentPage({ state, agentId, act, refresh, show, setSheet
 
       {/* The card itself, front and centre. Tap for Details. */}
       <button className="agent-hero" ref={heroRef} data-flight onClick={openDetails} aria-label={`${agent.name}: ${money(b.left)} left of ${money(b.total)}. ${doing}. Open details`}>
-        <AgentCardFace agent={agent} item={subLine(state, agent.id) ?? m?.item} left={b.left} total={b.total} status={cardStatus} tone={tone} {...cardStats(state, agent.id)} />
+        <AgentCardFace agent={agent} item={sub?.item ?? m?.item} figure={sub?.figure} left={b.left} total={b.total} status={cardStatus} tone={tone} {...cardStats(state, agent.id)} />
       </button>
 
       <div ref={bodyRef} className="agent-body">
@@ -495,7 +496,7 @@ function Message({ m, state, agent, tone, act, busy, decide, setSheet, showAvata
         </div>
         {purchase && <div id={`buy-${purchase.id}`}><PurchaseChip state={state} p={purchase} act={act} setSheet={setSheet} /></div>}
         {order && <div id={`order-${order.id}`}>{order.kind === "weekly" ? <OrderCard state={state} o={order} act={act} /> : <NowCard o={order} act={act} />}</div>}
-        {alert && <BillAlertCard state={state} a={alert} act={act} openProof={(id) => setSheet({ kind: "proof", id })} />}
+        {alert && <BillAlertCard inChat state={state} a={alert} act={act} openProof={(id) => setSheet({ kind: "proof", id })} />}
         {proposal && <div id={`prop-${proposal.id}`}><ProposalCard p={proposal} agentName={agent.name} busy={busy} onApprove={(auth) => decide(proposal.id, true, auth)} onDecline={() => decide(proposal.id, false)} /></div>}
         <span className={`caption muted ${mine ? "right" : ""}`}>{when(m.at)}</span>
       </div>
